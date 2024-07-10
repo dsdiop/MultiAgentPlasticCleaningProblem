@@ -225,7 +225,7 @@ class DQFDuelingVisualNetwork(nn.Module):
 	def __init__(
 			self,
 			in_dim: tuple,
-			out_dim: int,
+			out_dims: list,
 			number_of_features: int,
 			archtype: str='v1',
             nettype: str='0'
@@ -233,7 +233,7 @@ class DQFDuelingVisualNetwork(nn.Module):
 		"""Initialization."""
 		super(DQFDuelingVisualNetwork, self).__init__()
 
-		self.out_dim = out_dim
+		self.out_dims = out_dims
 		self.archtype = archtype
 		if self.archtype == 'v1':
 			# set common feature layer
@@ -269,7 +269,7 @@ class DQFDuelingVisualNetwork(nn.Module):
 
 		# set advantage layer
 		self.advantage_hidden_layer1 = nn.Linear(256, 64)
-		self.advantage_layer1 = nn.Linear(64, out_dim)
+		self.advantage_layer1 = nn.Linear(64, self.out_dims[0])
 
 		# set value layer
 		self.value_hidden_layer1 = nn.Linear(256, 64)
@@ -277,7 +277,7 @@ class DQFDuelingVisualNetwork(nn.Module):
 
 		# set advantage layer
 		self.advantage_hidden_layer2 = nn.Linear(256, 64)
-		self.advantage_layer2 = nn.Linear(64, out_dim)
+		self.advantage_layer2 = nn.Linear(64, self.out_dims[1])
 
 		# set value layer
 		self.value_hidden_layer2 = nn.Linear(256, 64)

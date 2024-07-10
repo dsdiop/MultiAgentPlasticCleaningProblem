@@ -24,12 +24,15 @@ class SafeActionMasking:
 
 	def mask_action(self, q_values: np.ndarray = None):
 
-		if q_values is None:
-			""" Random selection """
-			q_values = np.random.rand(8)
+		#if q_values is None:
+			#""" Random selection """
+		#	q_values = np.random.rand(n_actions)
 
 		movements = np.asarray([np.round(np.array([self.movement_length * np.cos(angle), self.movement_length * np.sin(angle)])).astype(int) for angle in self.angle_set])
 		next_positions = self.position + movements
+		# if the size of q_values is different from the number of actions, we need to add a position to next_positions that is the current position
+		if q_values.size == 9:	
+			next_positions = np.vstack((next_positions, self.position))
 		world_collisions = [(new_position[0] < 0) or (new_position[0] >= self.navigation_map.shape[0]) or (new_position[1] < 0) or (new_position[1] >= self.navigation_map.shape[1])
 					for new_position in next_positions]
 
@@ -123,6 +126,8 @@ class ConsensusSafeActionMasking:
 				movements = np.asarray([np.round(np.array([self.movement_length * np.cos(angle), self.movement_length * np.sin(angle)])) for angle in self.angle_set]).astype(int)
 				#movements = np.asarray([np.round(np.array([np.cos(angle), np.sin(angle)])) * self.movement_length for angle in self.angle_set]).astype(int)
 				next_positions = agent_position + movements
+				if q_values[agent].size == 9:	
+					next_positions = np.vstack((next_positions, agent_position))
 				world_collisions = [(new_position[0] < 0) or (new_position[0] >= self.fleet_map.shape[0]) or (new_position[1] < 0) or (new_position[1] >= self.fleet_map.shape[1])
                       		for new_position in next_positions]
 				action_mask = np.array([self.fleet_map[int(next_position[0]), int(next_position[1])] == 0  if not world_collisions[i] else True 

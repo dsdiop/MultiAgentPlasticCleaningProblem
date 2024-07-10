@@ -32,6 +32,7 @@ seed_eval = 30
 prewarm_buffer = data_path+'/prewarm_buffer/buffer.pkl'
 for batch_size in [128]:
     prewarm_buffer = data_path+'/prewarm_buffer/buffer.pkl'
+    prewarm_buffer = None
     for arch in archs:
         eval_dir = f'{data_path}/Evaluation/Results/'
         if not os.path.exists(eval_dir):
@@ -47,11 +48,9 @@ for batch_size in [128]:
                                 detection_length=2,
                                 movement_length=2,
                                 max_collisions=15,
-                                forget_factor=0.5,
-                                minimum_importance=0.1,
                                 reward_type='Double reward'+rew,
                                 convert_to_uint8=True,
-                                ground_truth_type='algae_bloom',
+                                ground_truth_type='macro_plastic',
                                 obstacles=False,
                                 frame_stacking=1,
                                 state_index_stacking=(1, 2, 3)
@@ -74,7 +73,7 @@ for batch_size in [128]:
                                             noisy=False,
                                             nettype=nettype,
                                             archtype=arch,
-                                            device='cuda:1',
+                                            device='cuda:0',
                                             weighted=False,
                                             train_every=7,
                                             save_every=1000,
@@ -83,7 +82,7 @@ for batch_size in [128]:
                                             prewarmed_memory=None,
                                             use_nu=True,
                                             nu_intervals=[[0., 1], [0.30, 1], [0.60, 0.], [1., 0.]],
-                                            concatenatedDQN = True,
+                                            concatenatedDQN = False,
                                             eval_episodes=100,
                                             masked_actions= True,
                                             consensus = True,

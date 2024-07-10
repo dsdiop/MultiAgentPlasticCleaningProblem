@@ -16,7 +16,7 @@ macroplastic_colormap = matplotlib.colors.LinearSegmentedColormap.from_list("", 
 class macro_plastic:
 
     def __init__(self, grid: np.ndarray, dt = 0.2, max_number_of_pollution_spots = 3, max_number_of_trash_elements_per_spot = 100, seed = 0) -> None:
-        """ Generador de ground truths de algas con dinámica """
+        """ Generador de ground truths de plásticos con dinámica """
         self.seed = seed
         self.rng = np.random.default_rng(seed=self.seed) # random number generator, it's better than set a np.random.seed() (https://builtin.com/data-science/numpy-random-seed)
         self.rng_seed_for_steps = np.random.default_rng(seed=self.seed+1)
@@ -40,10 +40,7 @@ class macro_plastic:
         
         distances, self.closest_indices = distance_transform_edt(grid == 0, return_indices=True)
         
-        #self.contour_currents_x = convolve(self.grid, np.array([[0,0,0,0,0],[0,0,0,0,0],[0,0,1,-1,-2],[0,0,0,0,0],[0,0,0,0,0]]), mode='constant')
-        #self.contour_currents_y = convolve(self.grid, np.array([[0,0,0,0,0],[0,0,0,0,0],[0,0,1,0,0],[0,0,-1,0,0],[0,0,-2,0,0]]), mode='constant')
-        self.contour_currents_x = convolve(self.grid, np.array([[0,0,0],[0,1,-1],[0,0,0]]), mode='constant')*2
-        self.contour_currents_y = convolve(self.grid, np.array([[0,0,0],[0,1,0],[0,-1,0]]), mode='constant')*2
+        self.discretized_particles = np.array([])
     def reset(self):
         #self.in_bound_particles = np.array([])
         self.pollution_spots_number = self.rng_pollution_spots_number.integers(1, self.max_number_of_pollution_spots+1)
@@ -63,9 +60,7 @@ class macro_plastic:
         self.particles = np.clip(self.particles, 0, np.array(self.map.shape)-1)
         self.particles = np.array([self.keep_inside_navigable_zone(particle) for particle in self.particles if self.is_inside_map(particle)])
         #self.inbound_particles = np.array([self.keep_inside_navigable_zone(particle) for particle in self.particles])
-        
-        for particle in self.particles:
-            self.map[np.round(particle[0]).astype(int), np.round(particle[1]).astype(int)] += 1.0
+        self.discretize_map()
 
         #self.algae_map = gaussian_filter(self.map, 0.8)
         # New seed for steps #
@@ -103,9 +98,7 @@ class macro_plastic:
 
         particles = np.array([self.apply_current_field(particle) for particle in self.particles])
         self.particles = np.array([self.keep_inside_navigable_zone(particle) for particle in particles if particle is not None])
-        self.map[:,:] = 0.0
-        for particle in self.particles:
-            self.map[np.round(particle[0]).astype(int), np.round(particle[1]).astype(int)] += 1.0
+        self.discretize_map()
         return self.map
 
     def render(self):
@@ -128,8 +121,28 @@ class macro_plastic:
         plt.pause(0.01)
     
     def read(self):
-
+        self.discretize_map()
         return self.map
+    
+    def clean_particles(self, position, n_particles):
+        "Given a position and the number of particles to clean, it removes the particles from the list of particles"
+        # We see what particles are inside the position
+        particles_to_remove = []
+        for i, discretized_particle in enumerate(self.discretized_particles):
+            if np.all(discretized_particle == position):
+                particles_to_remove.append(i)
+            if len(particles_to_remove) == n_particles:
+                break
+        # We remove the particles
+        self.particles = np.delete(self.particles, particles_to_remove, axis=0)
+        self.discretize_map()
+        return len(particles_to_remove)
+    def discretize_map(self):
+        self.map[:,:] = 0.0
+        self.discretized_particles = np.zeros_like(self.particles).astype(int)
+        for i, particle in enumerate(self.particles):
+            self.discretized_particles[i] = np.round(particle).astype(int)
+            self.map[self.discretized_particles[i][0], self.discretized_particles[i][1]] += 1.0
 
 if __name__ == '__main__':
 

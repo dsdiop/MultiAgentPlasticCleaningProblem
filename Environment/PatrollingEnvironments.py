@@ -5,8 +5,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 # from Environment.GroundTruthsModels.MacroPlasticGroundtruth import macro_plastic, macroplastic_colormap, background_colormap
 # from Environment.Wrappers.time_stacking_wrapper import MultiAgentTimeStackingMemory
-from GroundTruthsModels.MacroPlasticGroundTruth import macro_plastic, macroplastic_colormap, background_colormap
-from Wrappers.time_stacking_wrapper import MultiAgentTimeStackingMemory
+from Environment.GroundTruthsModels.MacroPlasticGroundTruth import macro_plastic, macroplastic_colormap, background_colormap
+from Environment.Wrappers.time_stacking_wrapper import MultiAgentTimeStackingMemory
 from scipy.spatial import distance_matrix
 import matplotlib
 import json
@@ -40,11 +40,14 @@ class DiscreteVehicle:
 
 	def move(self, action, valid=True):
 		""" Move a vehicle in the direction of the action. If valid is False, the action is not performed. """
-
-		angle = self.angle_set[action]
-		movement = np.round(np.array([self.movement_length * np.cos(angle), self.movement_length * np.sin(angle)])).astype(int)
-		next_position = self.position + movement
-		self.distance += np.linalg.norm(self.position - next_position)
+		if action < len(self.angle_set):
+			angle = self.angle_set[action]
+			movement = np.round(np.array([self.movement_length * np.cos(angle), self.movement_length * np.sin(angle)])).astype(int)
+			next_position = self.position + movement
+			self.distance += np.linalg.norm(self.position - next_position)
+		else:
+			next_position = self.position
+			self.distance += self.movement_length
 
 		if self.check_collision(next_position) or not valid:
 			collide = True
@@ -117,7 +120,8 @@ class DiscreteVehicle:
 
 	def check_action(self, action):
 		""" Return True if the action leads to a collision """
-
+		if action >= len(self.angle_set):
+			return False
 		angle = self.angle_set[action]
 		movement = np.round(np.array([self.movement_length * np.cos(angle), self.movement_length * np.sin(angle)])).astype(int)
 		next_position = self.position + movement
@@ -173,10 +177,12 @@ class DiscreteFleet:
 		new_positions = []
 
 		for idx, veh_action in veh_actions.items():
-
-			angle = self.vehicles[idx].angle_set[veh_action]
-			movement = np.round(np.array([self.vehicles[idx].movement_length * np.cos(angle), self.vehicles[idx].movement_length * np.sin(angle)])).astype(int)
-			new_positions.append(list(self.vehicles[idx].position + movement))
+			if veh_action >= len(self.vehicles[idx].angle_set):
+				new_positions.append(list(self.vehicles[idx].position))
+			else:
+				angle = self.vehicles[idx].angle_set[veh_action]
+				movement = np.round(np.array([self.vehicles[idx].movement_length * np.cos(angle), self.vehicles[idx].movement_length * np.sin(angle)])).astype(int)
+				new_positions.append(list(self.vehicles[idx].position + movement))
 
 		_, inverse_index, counts = np.unique(np.asarray(new_positions), return_inverse=True, return_counts=True, axis=0)
 
@@ -275,6 +281,7 @@ class MultiAgentPatrolling(gym.Env):
 		self.scenario_map = scenario_map
 		self.visitable_locations = np.vstack(np.where(self.scenario_map != 0)).T
 		self.number_of_agents = number_of_vehicles
+		self.action_space = gym.spaces.Discrete(17)
 
 		# Initial positions
 		if fleet_initial_positions is None:
@@ -327,7 +334,6 @@ class MultiAgentPatrolling(gym.Env):
 		self.inside_obstacles_map = None
 		self.state = None
 		self.fig = None
-		self.action_space = gym.spaces.Discrete(8)
 		self.convert_to_uint8 = convert_to_uint8
 		assert frame_stacking >= 0, "frame_stacking must be >= 0"
 		self.state_index_stacking = state_index_stacking
@@ -383,6 +389,8 @@ class MultiAgentPatrolling(gym.Env):
 				self.fleet.vehicles[i].navigation_map = self.scenario_map - self.inside_obstacles_map
     
 		self.last_positions = [deque(maxlen=self.trail_length) for _ in range(self.number_of_agents)]
+		
+		self.n_trash_cleaned = np.array([0 for _ in range(self.number_of_agents)])
 		# Update the state of the agents #
 		self.update_state()
 		# Metrics
@@ -437,10 +445,17 @@ class MultiAgentPatrolling(gym.Env):
 		# Process action movement only for active agents #
 		action = {action_id: action[action_id] for action_id in range(self.number_of_agents) if self.active_agents[action_id]}
 		collision_mask = self.fleet.move(action)
-
-		# Update model #
+		self.n_trash_cleaned = np.array([0 for _ in range(self.number_of_agents)])
+		# Clean the trash if requested #
+		for agent_id in range(self.number_of_agents):
+			if self.active_agents[agent_id]:
+				if action[agent_id] == 8:
+					n_trash_to_clean = 100
+					if self.gt.map[self.fleet.vehicles[agent_id].position[0],self.fleet.vehicles[agent_id].position[1]] > 0:
+						self.n_trash_cleaned[agent_id] = self.gt.clean_particles(self.fleet.vehicles[agent_id].position, n_trash_to_clean)
+       # Update model #
 		if self.miopic:
-			self.update_model()
+			self.update_model(action)
 		else:
 			self.model = self.gt.read()
 
@@ -465,7 +480,7 @@ class MultiAgentPatrolling(gym.Env):
 
 		return self.state if self.frame_stacking is None else self.frame_stacking.process(self.state), reward, done, self.info
 
-	def update_model(self):
+	def update_model(self,action):
 		""" Update the model using the new positions """
 
 		self.model_ant = self.model.copy()
@@ -483,7 +498,7 @@ class MultiAgentPatrolling(gym.Env):
 
 		import matplotlib.pyplot as plt
 
-		agente_disponible = np.argmin(self.active_agents)
+		agente_disponible = np.argmax(self.active_agents)
 
 		if not any(self.active_agents):
 			return
@@ -550,10 +565,9 @@ class MultiAgentPatrolling(gym.Env):
 		rewards_exploration = np.array(
 			[np.sum(self.fleet.new_visited_mask[veh.detection_mask.astype(bool)].astype(np.float32) 
                     / (self.detection_length * self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]) 
-           + self.model[veh.detection_mask.astype(bool)]) for veh in self.fleet.vehicles]
+           + np.clip(self.model[veh.detection_mask.astype(bool)],0,1)) for veh in self.fleet.vehicles]
 		)
-		rewards_cleaning = np.array(
-			[np.sum(np.clip(self.macro_plastic_gt[veh.detection_mask.astype(bool)],0,1)) for veh in self.fleet.vehicles])
+		rewards_cleaning = self.n_trash_cleaned
 
 		rewards = np.vstack((rewards_cleaning, rewards_exploration)).T
 
@@ -588,8 +602,6 @@ class MultiAgentPatrolling(gym.Env):
 			'movement_length': self.movement_length,
 			'min_movements_if_nocollisions': self.min_movements_if_nocollisions,
 			'max_number_of_colissions': self.max_collisions,
-			'forgetting_factor': self.forget_factor,
-			'attrition': self.attrition,
 			'reward_type': self.reward_type,
 			'ground_truth': self.ground_truth_type,
 			'frame_stacking': self.num_of_frame_stacking,
@@ -607,8 +619,7 @@ if __name__ == '__main__':
 
 
 	#sc_map = np.genfromtxt('Environment/Maps/example_map.csv', delimiter=',')
-	#sc_map = np.genfromtxt('Environment/Maps/malaga_port.csv', delimiter=',')
-	sc_map = np.genfromtxt('Maps/malaga_port.csv', delimiter=',')
+	sc_map = np.genfromtxt('Environment/Maps/malaga_port.csv', delimiter=',')
 
 	N = 4
 	initial_positions = np.array([[12, 7], [14, 5], [16, 3], [18, 1]])[:N, :]
@@ -631,7 +642,7 @@ if __name__ == '__main__':
 								ground_truth_type='macro_plastic',
 								obstacles=False,
 								frame_stacking=2,
-								state_index_stacking=(2,3,4),
+								state_index_stacking=(0,1,2),
 								reward_type='Double reward v2 v4',
 								convert_to_uint8=False,
 								trail_length = 20
@@ -639,22 +650,23 @@ if __name__ == '__main__':
 		reads = [2,4,9]
 		#lengths = [20,100,33]
 		gts = []
+		n_actions = 9
 		for k in trange(10):
 			env.reset()
 			lengths = 0
 			done = {i:False for i in range(4)}
 
 			R = []
-			action = {i: np.random.randint(0,8) for i in range(N)}
+			action = {i: np.random.randint(0,n_actions) for i in range(N)}
 
 			while not all(done.values()):
 				#action = {i: np.random.randint(0,8) for i in range(N)}
 				for idx, agent in enumerate(env.fleet.vehicles):
 				
-					agent_mask = np.array([agent.check_action(a) for a in range(8)], dtype=int)
+					agent_mask = np.array([agent.check_action(a) for a in range(n_actions)], dtype=int)
 
 					if agent_mask[action[idx]]:
-						action[idx] = np.random.choice(np.arange(8), p=(1-agent_mask)/np.sum((1-agent_mask)))
+						action[idx] = np.random.choice(np.arange(n_actions), p=(1-agent_mask)/np.sum((1-agent_mask)))
 				s, r, done, _ = env.step(action)
 				#print(env.steps)
 				env.render()

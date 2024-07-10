@@ -98,7 +98,7 @@ class MultiAgentDuelingDQNAgent:
 		""" Observation space dimensions """
 		obs_dim = env.observation_space.shape
 		action_dim = env.action_space.n
-		self.action_dim = action_dim
+		self.action_dim = [8, action_dim - 8]
 		""" Agent embeds the environment """
 		self.env = env
 		self.batch_size = batch_size
@@ -168,11 +168,11 @@ class MultiAgentDuelingDQNAgent:
 			self.dqn_target = DistributionalVisualNetwork(obs_dim, action_dim, number_of_features, num_atoms, self.support).to(self.device)
 		elif self.use_nu:
 			if not self.concatenatedDQN:
-				self.dqn = DQFDuelingVisualNetwork(obs_dim, action_dim, number_of_features,archtype,nettype).to(self.device)
-				self.dqn_target = DQFDuelingVisualNetwork(obs_dim, action_dim, number_of_features,archtype,nettype).to(self.device)
+				self.dqn = DQFDuelingVisualNetwork(obs_dim, self.action_dim, number_of_features,archtype,nettype).to(self.device)
+				self.dqn_target = DQFDuelingVisualNetwork(obs_dim, self.action_dim, number_of_features,archtype,nettype).to(self.device)
 			else:
-				self.dqn = ConcatenatedDuelingVisualNetwork(obs_dim, action_dim, number_of_features).to(self.device)
-				self.dqn_target = ConcatenatedDuelingVisualNetwork(obs_dim, action_dim, number_of_features).to(self.device)
+				self.dqn = ConcatenatedDuelingVisualNetwork(obs_dim, self.action_dim, number_of_features).to(self.device)
+				self.dqn_target = ConcatenatedDuelingVisualNetwork(obs_dim, self.action_dim, number_of_features).to(self.device)
 			self.loss_expl = deque(maxlen=3)
 			self.loss_inf = deque(maxlen=3)
 			self.weighting_method_name = weighting_method
@@ -208,10 +208,10 @@ class MultiAgentDuelingDQNAgent:
 
 		# Masking utilities #
 		if self.masked_actions:
-			self.safe_masking_module = SafeActionMasking(action_space_dim = action_dim, movement_length = self.env.movement_length)
+			self.safe_masking_module = SafeActionMasking(action_space_dim = self.action_dim[0], movement_length = self.env.movement_length)
 		
 		if self.consensus:
-			self.consensus_safe_action_masking = ConsensusSafeActionMasking(self.env.scenario_map, action_space_dim = action_dim, movement_length = self.env.movement_length)
+			self.consensus_safe_action_masking = ConsensusSafeActionMasking(self.env.scenario_map, action_space_dim = self.action_dim[0], movement_length = self.env.movement_length)
 			self.q_values4consensus = {agent_id: np.zeros((1, self.env.action_space.n)) for agent_id in range(self.env.number_of_agents)}
 	# TODO: Implement an annealed Learning Rate (see:
 	#  https://pytorch.org/docs/stable/generated/torch.optim.lr_scheduler.ReduceLROnPlateau.html#torch.optim.lr_scheduler.ReduceLROnPlateau)
@@ -225,9 +225,9 @@ class MultiAgentDuelingDQNAgent:
 		else:
 			q_values = self.dqn(torch.FloatTensor(state).unsqueeze(0).to(self.device)).detach().cpu().numpy()
 			if self.nu > np.random.rand():
-				selected_action = np.argmax(q_values.squeeze(0)[self.action_dim:])
+				selected_action = np.argmax(q_values.squeeze(0)[self.action_dim[0]:])
 			else:
-				selected_action = np.argmax(q_values.squeeze(0)[:self.action_dim])
+				selected_action = np.argmax(q_values.squeeze(0)[:self.action_dim[0]])
 
 
 		return selected_action
@@ -245,7 +245,7 @@ class MultiAgentDuelingDQNAgent:
 
 		return selected_action
 
-	def choose_q_function_masked_action(self, state: np.ndarray, agent_id: int, position: np.ndarray):	
+	def choose_q_function_masked_action(self, state: np.ndarray, agent_id: int, position: np.ndarray, condition: bool):	
 		""" Select an action masked to avoid collisions and so """
 
 		# Update the state of the safety module #
@@ -254,14 +254,16 @@ class MultiAgentDuelingDQNAgent:
 		if self.epsilon > np.random.rand() and not self.noisy:
 
 			# Compute randomly the action #
-			q_values, selected_action = self.safe_masking_module.mask_action(q_values = None)
-
+			if condition:
+				q_values, selected_action = self.safe_masking_module.mask_action(q_values =np.random.rand(self.action_dim[1]))
+			else:
+				q_values, selected_action = self.safe_masking_module.mask_action(q_values =np.random.rand(self.action_dim[0]))
 		else:
 			q_values = self.dqn(torch.FloatTensor(state).unsqueeze(0).to(self.device)).detach().cpu().numpy()
-			if self.nu > np.random.rand():
-				q_values = q_values.squeeze(0)[self.action_dim:]
+			if condition:
+				q_values = q_values.squeeze(0)[self.action_dim[0]:]
 			else:
-				q_values = q_values.squeeze(0)[:self.action_dim]
+				q_values = q_values.squeeze(0)[:self.action_dim[0]]
     
 			q_values, selected_action = self.safe_masking_module.mask_action(q_values = q_values.flatten())
                                                                     
@@ -294,7 +296,8 @@ class MultiAgentDuelingDQNAgent:
 	def select_action(self, states: dict) -> dict:
 
 		if self.use_nu:
-			actions = {agent_id: self.choose_q_function(state) for agent_id, state in states.items()}
+			condition = self.nu > np.random.rand()
+			actions = {agent_id: self.choose_q_function(state, condition=condition) for agent_id, state in states.items()}
 		else:
 			actions = {agent_id: self.predict_action(state) for agent_id, state in states.items()}
 
@@ -306,7 +309,9 @@ class MultiAgentDuelingDQNAgent:
 			self.q_values4consensus = {agent_id: np.zeros((1, self.env.action_space.n)) for agent_id, state in states.items()}
    
 		if self.use_nu:
-			actions = {agent_id: self.choose_q_function_masked_action(state, agent_id=agent_id, position=positions[agent_id]) for agent_id, state in states.items()}
+			# See which phase we are by choosing self.nu > np.random.rand()
+			condition = self.nu > np.random.rand()
+			actions = {agent_id: self.choose_q_function_masked_action(state, agent_id=agent_id, position=positions[agent_id], condition=condition) for agent_id, state in states.items()}
 		else:
 			actions = {agent_id: self.predict_masked_action(state=state, agent_id=agent_id, position=positions[agent_id]) for agent_id, state in states.items()}
    
@@ -645,15 +650,20 @@ class MultiAgentDuelingDQNAgent:
 		num_of_rewards = samples["rews"].shape[1]
 		with torch.no_grad():
 			next_maxq_values = self.dqn(next_state)
-			next_maxq_values = next_maxq_values.view((-1, num_of_rewards, self.action_dim))
-			next_max_action_values = next_maxq_values.max(dim=2, keepdim=True)[1]
+			#next_maxq_values = next_maxq_values.view((-1, num_of_rewards, self.action_dim))
+			#next_max_action_values = next_maxq_values.max(dim=2, keepdim=True)[1]
+			next_maxq_values_1 = next_maxq_values[:, :self.action_dim[0]]
+			next_maxq_values_2 = next_maxq_values[:, self.action_dim[0]:]
+			next_max_action_values_1 = next_maxq_values_1.max(dim=1, keepdim=True)[1]
+			next_max_action_values_2 = next_maxq_values_2.max(dim=1, keepdim=True)[1]
+			next_max_action_values = torch.cat([next_max_action_values_1, next_max_action_values_2], dim=1).view(128,2,-1)
 		elementwise_loss = [0, 0]
 		samples_aux = copy(samples)
 
 		if not self.distributional:
 			for i in range(num_of_rewards):
 				samples_aux["rews"] = samples["rews"][:, i]
-				offset = i*self.action_dim
+				offset = i*self.action_dim[0]
 				samples_aux["acts"] = samples["acts"] + offset
 
 				action = torch.LongTensor(samples_aux["acts"]).to(device)
