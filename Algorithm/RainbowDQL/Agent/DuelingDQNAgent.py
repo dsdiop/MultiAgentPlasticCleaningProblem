@@ -500,7 +500,7 @@ class MultiAgentDuelingDQNAgent:
 			                                   e_init=self.epsilon_values[0],
 			                                   e_fin=self.epsilon_values[1])
 			# Run an episode #
-			print('Episode: ', episode, 'Memory used: ', self.memory.ptr)
+			#print('Episode: ', episode, 'Memory used: ', self.memory.ptr)
 
 			while not all(done.values()):
 				if self.use_nu:

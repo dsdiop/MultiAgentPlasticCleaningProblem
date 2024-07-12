@@ -1,0 +1,10 @@
+/runs
+*.pyc
+*.pth
+*.DS_Store
+__pycache__/
+*.py[cod]
+*.idea
+*.vscode
+Results*
+*pruebas.py
