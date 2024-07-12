@@ -357,6 +357,10 @@ class MultiAgentPatrolling(gym.Env):
 		self.last_positions = [deque(maxlen=self.trail_length) for _ in range(self.number_of_agents)]
 		# Metrics
 		self.steps = 0
+		self.total_n_trash_cleaned = 0
+		self.min_percentage_of_trash_found = 0
+		self.percentage_of_trash_cleaned = 0
+		self.percentage_of_map_visited = 0
   
 	def reset(self):
 		""" Reset the environment """
@@ -395,6 +399,11 @@ class MultiAgentPatrolling(gym.Env):
 		self.update_state()
 		# Metrics
 		self.steps = 0
+		self.total_n_trash_cleaned = 0
+		self.min_percentage_of_trash_found = 0
+		self.percentage_of_trash_cleaned = 0
+		self.percentage_of_map_visited = 0
+		self.n_of_trash = np.sum(self.gt.map > 0)	
 		self.update_metrics()
     
 		return self.state if self.frame_stacking is None else self.frame_stacking.process(self.state)
@@ -491,7 +500,13 @@ class MultiAgentPatrolling(gym.Env):
 				self.model[vehicle.detection_mask.astype(bool)] = gt_[vehicle.detection_mask.astype(bool)]
     
 	def update_metrics(self):
-		pass
+		""" Update the metrics """
+		self.total_n_trash_cleaned += np.sum(self.n_trash_cleaned)
+		self.percentage_of_trash_cleaned = self.total_n_trash_cleaned / self.n_of_trash
+		self.min_percentage_of_trash_found = max(self.min_percentage_of_trash_found,
+                                              np.sum(self.gt.map[self.fleet.historic_visited_mask.astype(bool)] > 0) / self.n_of_trash)
+		self.percentage_of_map_visited = np.sum(self.fleet.historic_visited_mask) / np.sum(self.scenario_map)
+
 
         
 	def render(self):
@@ -537,7 +552,7 @@ class MultiAgentPatrolling(gym.Env):
 			self.axs[4].set_title("Others agents position")
 			# Redundacy
 			
-			self.im5 = self.axs[5].imshow(self.fleet.redundancy_mask, cmap = 'gray')
+			self.im5 = self.axs[5].imshow(self.fleet.historic_visited_mask, cmap = 'gray')
 			self.axs[5].set_title("Redundacy Mask")
 
 		self.im0.set_data(self.scenario_map)
@@ -551,7 +566,7 @@ class MultiAgentPatrolling(gym.Env):
 		self.im2.set_data(model_gt)
 		self.im3.set_data(self.state[agente_disponible][1])
 		self.im4.set_data(self.state[agente_disponible][2])
-		self.im5.set_data(self.fleet.redundancy_mask)
+		self.im5.set_data(self.fleet.historic_visited_mask)
 
 		self.fig.canvas.draw()
 		self.fig.canvas.flush_events()
@@ -562,15 +577,17 @@ class MultiAgentPatrolling(gym.Env):
 
 	def reward_function(self, collision_mask, actions):
 		""" Compute the reward for the agents """
-		rewards_exploration = np.array(
+		trash_monitoring_reward = np.array([np.sum( np.clip(self.gt.map[veh.detection_mask.astype(bool)],0,1)
+         		/ (np.sum(veh.detection_mask) * self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]))
+         			for veh in self.fleet.vehicles])
+		rewards_exploration = trash_monitoring_reward + np.array(
 			[np.sum(self.fleet.new_visited_mask[veh.detection_mask.astype(bool)].astype(np.float32) 
-                    / (self.detection_length * self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]) 
-           + np.clip(self.model[veh.detection_mask.astype(bool)],0,1)) for veh in self.fleet.vehicles]
+                    / self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]) for veh in self.fleet.vehicles]
 		)
-		rewards_cleaning = self.n_trash_cleaned
-
+		rewards_cleaning = trash_monitoring_reward + self.n_trash_cleaned 
+      			
 		rewards = np.vstack((rewards_cleaning, rewards_exploration)).T
-
+		print(rewards)
 		self.info = {}
 
 		#cost = {agent_id: 1 if action % 2 == 0 else np.sqrt(2) for agent_id, action in actions.items()}
@@ -618,8 +635,8 @@ class MultiAgentPatrolling(gym.Env):
 if __name__ == '__main__':
 
 
-	#sc_map = np.genfromtxt('Environment/Maps/example_map.csv', delimiter=',')
-	sc_map = np.genfromtxt('Environment/Maps/malaga_port.csv', delimiter=',')
+	sc_map = np.genfromtxt('Environment/Maps/example_map.csv', delimiter=',')
+	#sc_map = np.genfromtxt('Environment/Maps/malaga_port.csv', delimiter=',')
 
 	N = 4
 	initial_positions = np.array([[12, 7], [14, 5], [16, 3], [18, 1]])[:N, :]
