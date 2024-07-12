@@ -8,10 +8,9 @@ import numpy as np
 import torch
 
 N = 4
-sc_map = np.genfromtxt(data_path+'/Environment/Maps/example_map.csv', delimiter=',')
-visitable_locations = np.vstack(np.where(sc_map != 0)).T
-random_index = np.random.choice(np.arange(0,len(visitable_locations)), N, replace=False)
-initial_positions = np.asarray([[24, 21],[28,24],[27,19],[24,24]])
+
+sc_map = np.genfromtxt(data_path+'/Environment/Maps/malaga_port.csv', delimiter=',')
+initial_positions = np.array([[12, 7], [14, 5], [16, 3], [18, 1]])[:N, :]
 
 #initial_positions = np.array([[30, 20], [32, 20], [34, 20], [30, 22]])[:N, :]
 #visitable = np.column_stack(np.where(sc_map == 1))
@@ -37,8 +36,8 @@ for batch_size in [128]:
         eval_dir = f'{data_path}/Evaluation/Results/'
         if not os.path.exists(eval_dir):
             os.makedirs(eval_dir)
-        policy_name = 'Experimento_serv_2DQN'+'_rew_'+rew+'_bsize_'+str(batch_size)
-        logdir=f'./Learning/runs/Vehicles_{N}/FirstPaper/'+policy_name
+        policy_name = 'Experimento_clean1'+'_rew_'+rew+'_bsize_'+str(batch_size)
+        logdir=f'./Learning/runs/Vehicles_{N}/SecondPaper/'+policy_name
         env = MultiAgentPatrolling(scenario_map=sc_map,
                                 fleet_initial_positions=initial_positions,
                                 distance_budget=200,
