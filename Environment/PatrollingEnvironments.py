@@ -590,11 +590,6 @@ class MultiAgentPatrolling(gym.Env):
 		print(rewards)
 		self.info = {}
 
-		#cost = {agent_id: 1 if action % 2 == 0 else np.sqrt(2) for agent_id, action in actions.items()}
-		distances = [dist/self.detection_length for dist in self.fleet.get_distances()]
-		cost = {agent_id: 1 if 'vx' not in self.reward_type else distances[agent_id] for agent_id in range(self.fleet.number_of_vehicles)}
-		rewards = {agent_id: rewards[agent_id] / cost[agent_id] if not collision_mask[agent_id] else -1.0*np.ones(2) / cost[agent_id] for
-				   agent_id in actions.keys()}
 		return {agent_id: rewards[agent_id] for agent_id in range(self.number_of_agents) if
 				self.active_agents[agent_id]}
 
