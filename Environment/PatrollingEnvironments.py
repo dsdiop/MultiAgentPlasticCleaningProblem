@@ -587,7 +587,7 @@ class MultiAgentPatrolling(gym.Env):
 		rewards_cleaning = trash_monitoring_reward + self.n_trash_cleaned 
       			
 		rewards = np.vstack((rewards_cleaning, rewards_exploration)).T
-		print(rewards)
+		#print(rewards)
 		self.info = {}
 
 		return {agent_id: rewards[agent_id] for agent_id in range(self.number_of_agents) if

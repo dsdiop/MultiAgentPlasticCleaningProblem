@@ -225,9 +225,9 @@ class MultiAgentDuelingDQNAgent:
 		else:
 			q_values = self.dqn(torch.FloatTensor(state).unsqueeze(0).to(self.device)).detach().cpu().numpy()
 			if self.nu > np.random.rand():
-				selected_action = np.argmax(q_values.squeeze(0)[self.action_dim[0]:])
-			else:
 				selected_action = np.argmax(q_values.squeeze(0)[:self.action_dim[0]])
+			else:
+				selected_action = np.argmax(q_values.squeeze(0)[self.action_dim[0]:])
 
 
 		return selected_action
@@ -255,15 +255,19 @@ class MultiAgentDuelingDQNAgent:
 
 			# Compute randomly the action #
 			if condition:
-				q_values, selected_action = self.safe_masking_module.mask_action(q_values =np.random.rand(self.action_dim[1]))
-			else:
 				q_values, selected_action = self.safe_masking_module.mask_action(q_values =np.random.rand(self.action_dim[0]))
+			else:
+				q_values, selected_action = self.safe_masking_module.mask_action(q_values =np.random.rand(self.action_dim[1]))
+				# if there is trash in the position of the agent, the agent will pick it up
+				if self.env.gt.map[int(position[0]), int(position[1])] > 0:
+					selected_action = -1
+					q_values[selected_action] = np.inf
 		else:
 			q_values = self.dqn(torch.FloatTensor(state).unsqueeze(0).to(self.device)).detach().cpu().numpy()
 			if condition:
-				q_values = q_values.squeeze(0)[self.action_dim[0]:]
-			else:
 				q_values = q_values.squeeze(0)[:self.action_dim[0]]
+			else:
+				q_values = q_values.squeeze(0)[self.action_dim[0]:]
     
 			q_values, selected_action = self.safe_masking_module.mask_action(q_values = q_values.flatten())
                                                                     
@@ -354,14 +358,15 @@ class MultiAgentDuelingDQNAgent:
 					loss = sum([torch.mean(elementwise_loss[i] * weights).reshape(1) for i in range(len(elementwise_loss))])
 		
 			else:
-				loss = sum([torch.mean(elementwise_loss[i] * weights).reshape(1) for i in range(len(elementwise_loss))])
+				loss = sum([torch.mean(elementwise_loss[i] * weights[self.action_mask[i]]).reshape(1) for i in range(len(elementwise_loss))])
 				loss.backward()
-			self.writer.add_scalar('pruebas/loss_inf', torch.mean(elementwise_loss[0] * weights).detach().cpu(), self.episode)
-			self.writer.add_scalar('pruebas/loss_exp', torch.mean(elementwise_loss[1] * weights).detach().cpu(), self.episode)
+			self.writer.add_scalar('pruebas/loss_inf', torch.mean(elementwise_loss[0] * weights[self.action_mask[0]]).detach().cpu(), self.episode)
+			self.writer.add_scalar('pruebas/loss_exp', torch.mean(elementwise_loss[1] * weights[self.action_mask[1]]).detach().cpu(), self.episode)
 			if self.weighting_method is not None:
 				elementwise_loss = extra_outputs['weights'][0]*elementwise_loss[0] + extra_outputs['weights'][1]*elementwise_loss[1]
 			else:
-				elementwise_loss = elementwise_loss[0] + elementwise_loss[1]
+				#elementwise_loss = elementwise_loss[0] + elementwise_loss[1]
+				pass
 		else:
 			elementwise_loss = self._compute_dqn_loss(samples)
 			loss = torch.mean(elementwise_loss * weights)
@@ -371,9 +376,14 @@ class MultiAgentDuelingDQNAgent:
 		self.optimizer.step()
 
 		# PER: update priorities
-		loss_for_prior = elementwise_loss.detach().cpu().numpy()
+		for i in range(len(elementwise_loss)):
+			loss_for_prior = elementwise_loss[i].detach().cpu().numpy()
+			new_priorities = loss_for_prior + self.prior_eps
+			self.memory.update_priorities(np.asarray(indices)[self.action_mask[i]].tolist(), new_priorities)
+   
+		"""loss_for_prior = elementwise_loss.detach().cpu().numpy()
 		new_priorities = loss_for_prior + self.prior_eps
-		self.memory.update_priorities(indices, new_priorities)
+		self.memory.update_priorities(indices, new_priorities)"""
 		
 		# Sample new noisy distribution
 		if self.noisy:
@@ -381,43 +391,7 @@ class MultiAgentDuelingDQNAgent:
 			self.dqn_target.reset_noise()
 
 		return loss.item()
-	"""
-	def update_model(self) -> torch.Tensor:
-		# Update the model by gradient descent. #
 
-		# PER needs beta to calculate weights
-		samples = self.memory.sample_batch(self.beta)
-		weights = torch.FloatTensor(samples["weights"].reshape(-1, 1)).to(self.device)
-		indices = samples["indices"]
-		losses = []
-		samples_aux = copy(samples)
-		for i in range(2):
-			samples_aux["rews"] = samples["rews"][:, i]
-			offset = i*self.action_dim
-			samples_aux["acts"] = samples["acts"] + offset
-			# PER: importance sampling before average
-			elementwise_loss = self._compute_dqn_loss(samples_aux)
-			loss = torch.mean(elementwise_loss * weights)
-
-			# Compute gradients and apply them
-			self.optimizer.zero_grad()
-			loss.backward()
-			self.optimizer.step()
-
-			# PER: update priorities
-			loss_for_prior = elementwise_loss.detach().cpu().numpy()
-			new_priorities = loss_for_prior + self.prior_eps
-			self.memory.update_priorities(indices, new_priorities)
-			losses.append(loss.item())
-		
-			# Sample new noisy distribution
-			if self.noisy:
-				self.dqn.reset_noise()
-				self.dqn_target.reset_noise()
-		
-
-		return losses
-	"""
 	@staticmethod
 	def anneal_nu(p, p1=[0., 1], p2=[0.5, 1.], p3=[0.5, 0.], p4=[1., 0.]):
 
@@ -658,23 +632,27 @@ class MultiAgentDuelingDQNAgent:
 			next_max_action_values_2 = next_maxq_values_2.max(dim=1, keepdim=True)[1]
 			next_max_action_values = torch.cat([next_max_action_values_1, next_max_action_values_2], dim=1).view(128,2,-1)
 		elementwise_loss = [0, 0]
+		self.action_mask = [None, None]
 		samples_aux = copy(samples)
 
 		if not self.distributional:
 			for i in range(num_of_rewards):
 				samples_aux["rews"] = samples["rews"][:, i]
 				offset = i*self.action_dim[0]
-				samples_aux["acts"] = samples["acts"] + offset
+				# remove the actions that are not in the action space of the agent
+				self.action_mask[i] = samples["acts"] < self.action_dim[i]
+				samples_aux["acts"] = samples["acts"][self.action_mask[i]] + offset
 
 				action = torch.LongTensor(samples_aux["acts"]).to(device)
-				reward = torch.FloatTensor(samples_aux["rews"].reshape(-1, 1)).to(device)
+				reward = torch.FloatTensor(samples_aux["rews"][self.action_mask[i]].reshape(-1, 1)).to(device)
+
 				action = action.reshape(-1, 1)
-				curr_q_value = self.dqn(state).gather(1, action)
-				next_max_action_value = next_max_action_values[:, i] + offset
-				done_mask = 1 - done
+				curr_q_value = self.dqn(state[self.action_mask[i]]).gather(1, action)
+				next_max_action_value = next_max_action_values[:, i][self.action_mask[i]] + offset
+				done_mask = 1 - done[self.action_mask[i]]
 
 				with torch.no_grad():
-					next_q_value = self.dqn_target(next_state).gather(1, next_max_action_value)
+					next_q_value = self.dqn_target(next_state[self.action_mask[i]]).gather(1, next_max_action_value)
 					target = (reward + self.gamma**self.n_steps * next_q_value * done_mask).to(self.device)
 
 				# calculate element-wise dqn loss
