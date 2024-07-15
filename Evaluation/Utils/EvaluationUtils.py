@@ -54,7 +54,7 @@ def prewarm_buffer(path: str, env, runs: int, n_agents: int, ground_truth_type: 
       		info = {}):
 	
 	distance_budget = env.distance_budget
-	algorithms = ['LawnMower','RandomWandering', 'GreedyAgent']
+	algorithms = ['RandomWandering']
 	for algorithm in algorithms:
 		if algorithm == 'RandomWandering':
 			if 'seed' in info.keys():
@@ -107,13 +107,12 @@ def prewarm_buffer(path: str, env, runs: int, n_agents: int, ground_truth_type: 
 				total_length += 1
 				other_positions = []
 				acts = []
-				idleness_matrix =  env.idleness_matrix
-				interest_map = env.importance_matrix
 				distance = np.min([np.max(env.fleet.get_distances()), distance_budget])
 				nu = anneal_nu(p= distance / distance_budget)
 				# Compute the actions #
 				for i in range(n_agents):
 					if algorithm == 'GreedyAgent':
+						continue	
 						action_exp, action_inf = agents[i].move(env.fleet.vehicles[i].position, other_positions, idleness_matrix, interest_map)
 						if nu > np.random.rand():
 							action_mat = action_exp
@@ -124,7 +123,11 @@ def prewarm_buffer(path: str, env, runs: int, n_agents: int, ground_truth_type: 
 						new_position = action_mat[1]
 						action = action_mat[0]
 					else:
-						action, new_position = agents[i].move(env.fleet.vehicles[i].position,other_positions)
+						if env.gt.map[int(env.fleet.vehicles[i].position[0]), int(env.fleet.vehicles[i].position[1])] > 0:
+							action = 8
+							new_position = env.fleet.vehicles[i].position
+						else:
+							action, new_position = agents[i].move(env.fleet.vehicles[i].position,other_positions)
 
 					acts.append(action)
 					if list(new_position) in other_positions:
@@ -135,6 +138,7 @@ def prewarm_buffer(path: str, env, runs: int, n_agents: int, ground_truth_type: 
 
 				# Process the agent step #
 				next_state, reward, done, _ = env.step(actions)
+				#env.render()
 				for agent_id in actions.keys():
 					"""agent_id = np.random.randint(0, self.env.number_of_agents) ##########################################
 					while agent_id not in actions.keys():
