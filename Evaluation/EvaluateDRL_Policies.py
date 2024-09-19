@@ -127,7 +127,7 @@ def EvaluateMultiagent(number_of_agents: int,
                                         distributional=False,
                                         logdir=f'Learning/runs/Vehicles_{N}/{policy_path}',
                                         use_nu=agent_config['use_nu'],
-                                        nu_intervals=agent_config['nu_intervals'] if nu_interval is None else nu_interval,
+                                        nu_intervals= agent_config['nu_intervals'] if nu_interval is None else nu_interval,
                                         concatenatedDQN = agent_config['concatenatedDQN'],
                                         eval_episodes=num_of_eval_episodes,
                                         eval_every=1000)
@@ -239,7 +239,8 @@ def EvaluateMultiagent(number_of_agents: int,
             #print(env.fleet.get_positions())
             # Process the agent step #
             next_state, reward, done = multiagent.step(actions)
-            print(reward)
+            print("Number of trash collected: ", env.total_n_trash_cleaned)
+            
             if total_length==40:
                 fsagefsdvefsgd=0
                 #print(hey)
@@ -328,17 +329,12 @@ def EvaluateMultiagent(number_of_agents: int,
 
 if __name__ == '__main__':
     if True:
-        N = 4
-        sc_map = np.genfromtxt(f'{data_path}/Environment/Maps/example_map.csv', delimiter=',')
-        visitable_locations = np.vstack(np.where(sc_map != 0)).T
-        random_index = np.random.choice(np.arange(0,len(visitable_locations)), N, replace=False)
-        initial_positions = np.asarray([[24, 21],[28,24],[27,19],[24,24]])
-        num_of_eval_episodes = 1
-        #sc_map = np.genfromtxt('Environment/Maps/malaga_port.csv', delimiter=',')
-        initial_positions = np.array([[12, 7], [14, 5], [16, 3], [18, 1]])[:N, :]
+        num_of_eval_episodes = 10
+        sc_map = np.genfromtxt('Environment/Maps/malaga_port.csv', delimiter=',')
 
         N = 4
         initial_positions = np.array([[12, 7], [14, 5], [16, 3], [18, 1]])[:N, :]
+        visitable_locations = np.vstack(np.where(sc_map != 0)).T
         policy_types = ['Final_Policy','BestPolicy']
         nu_intervals ={'1':[[0., 1], [0.10, 1], [0.90, 1.], [1., 1.]],
                        '2':[[0., 1], [0.80, 1], [0.90, 0.], [1., 0.]],
@@ -367,7 +363,7 @@ if __name__ == '__main__':
                 if 'Final_Policy' not in policy_type:
                     continue
                 for i,policy_name in enumerate(policy_names_veh4_first_paper):
-                    if ('Experimento_clean1_rew_v5_bsize_128' not in policy_name):
+                    if ('Experimento_clean7' not in policy_name):
                     #if (('Experimento_serv_2_net_0_arch_v1_rew_v4'  not in policy_name) and ('Experimento_serv_2_net_0_arch_v2_rew_v2' not in policy_name)) or ('one_agent_saves_in_buffer' in policy_name):
                         continue
                     print(policy_name,nu_interval,policy_type)
@@ -377,7 +373,7 @@ if __name__ == '__main__':
                     
                     #policy_name = 'Experimento_serv_fixed_rng_net_0_arch_v1_rew_v5'
                     policy_path = f'{data_path1}/{policy_name}/'
-                    seed = 30 #17#43#45#3#31#
+                    seed = 17#30#43#45#3#31#
                     EvaluateMultiagent(number_of_agents=N,
                                     sc_map=sc_map,
                                     visitable_locations=visitable_locations,
@@ -389,7 +385,7 @@ if __name__ == '__main__':
                                     policy_name=f'{policy_name}_{nu_interval}',
                                     metrics_directory= f'./Evaluation/Results_seed_30_CAEPIA_0/ff02/{policy_type}_ff02',
                                     nu_interval = nu_intervals[nu_interval],
-                                    render = False
+                                    render = True
                                     )
             """plt.figure()
             plt.plot(imm)
