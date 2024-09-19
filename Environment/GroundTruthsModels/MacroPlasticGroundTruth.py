@@ -51,7 +51,7 @@ class macro_plastic:
         number_of_trash_elements_in_each_spot = self.rng_number_of_trash_elements.normal(loc=0, 
                                                                                       scale=self.max_number_of_trash_elements_per_spot, 
                                                                                       size=self.pollution_spots_number).round().astype(int)
-        self.number_of_trash_elements_in_each_spot = np.clip(np.abs(number_of_trash_elements_in_each_spot),10, self.max_number_of_trash_elements_per_spot)
+        self.number_of_trash_elements_in_each_spot = np.clip(np.abs(number_of_trash_elements_in_each_spot),int(100/number_of_trash_elements_in_each_spot.shape[0]), self.max_number_of_trash_elements_per_spot)
         #number_of_trash_elements_in_each_spot[number_of_trash_elements_in_each_spot <= 0] = 10 # minimum number of trash elements in a spot
         cov = 7.0
         self.particles = self.rng_trash_positions_MVN.multivariate_normal(self.visitable_positions[starting_points[0]], np.array([[cov, 0.0],[0.0, cov]]),size=(self.number_of_trash_elements_in_each_spot[0],)) 
@@ -62,7 +62,7 @@ class macro_plastic:
         #self.inbound_particles = np.array([self.keep_inside_navigable_zone(particle) for particle in self.particles])
         self.discretize_map()
 
-        #self.algae_map = gaussian_filter(self.map, 0.8)
+
         # New seed for steps #
         self.wind_direction = self.rng_wind_direction.uniform(low=-1.0, high=1.0, size=2)
         self.rng_steps = np.random.default_rng(seed=self.rng_seed_for_steps.integers(0, 1000000))
@@ -143,6 +143,12 @@ class macro_plastic:
         for i, particle in enumerate(self.particles):
             self.discretized_particles[i] = np.round(particle).astype(int)
             self.map[self.discretized_particles[i][0], self.discretized_particles[i][1]] += 1.0
+        
+        self.filtered_map = gaussian_filter(self.map, 10, mode = 'constant', cval=0) * self.grid
+        if np.max(self.filtered_map) == 0:
+            self.normalized_filtered_map = np.zeros_like(self.filtered_map)
+        else:
+            self.normalized_filtered_map = (self.filtered_map-np.min(self.filtered_map))/(np.max(self.filtered_map)-np.min(self.filtered_map))
 
 if __name__ == '__main__':
 

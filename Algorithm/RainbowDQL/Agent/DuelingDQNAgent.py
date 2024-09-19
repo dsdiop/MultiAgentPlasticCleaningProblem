@@ -152,7 +152,7 @@ class MultiAgentDuelingDQNAgent:
 				with open(prewarmed_memory, 'rb') as f:	
 					prewarmed_buffer = pickle.load(f)
 			else:
-				prewarmed_buffer = prewarm_buffer("", self.env, 500, self.env.number_of_agents, 
+				prewarmed_buffer = prewarm_buffer("", self.env, 1500, self.env.number_of_agents, 
 									self.env.ground_truth_type, nu_intervals=self.nu_intervals, memory=self.memory)
 				os.makedirs(os.path.dirname(prewarmed_memory), exist_ok=True)
 				with open(prewarmed_memory, 'wb') as f:
@@ -270,7 +270,15 @@ class MultiAgentDuelingDQNAgent:
 				q_values = q_values.squeeze(0)[self.action_dim[0]:]
     
 			q_values, selected_action = self.safe_masking_module.mask_action(q_values = q_values.flatten())
-                                                                    
+		# do not clean when there is no trash
+		if not condition:
+			if not self.env.gt.map[int(position[0]), int(position[1])] > 0:
+				selected_action = -1
+				q_values[selected_action] = -np.inf 
+			else:
+				selected_action = -1
+				q_values[selected_action] = np.inf 
+                                                        
 		if self.consensus:
 			self.q_values4consensus[agent_id] = q_values
    
@@ -360,8 +368,8 @@ class MultiAgentDuelingDQNAgent:
 			else:
 				loss = sum([torch.mean(elementwise_loss[i] * weights[self.action_mask[i]]).reshape(1) for i in range(len(elementwise_loss))])
 				loss.backward()
-			self.writer.add_scalar('pruebas/loss_inf', torch.mean(elementwise_loss[0] * weights[self.action_mask[0]]).detach().cpu(), self.episode)
-			self.writer.add_scalar('pruebas/loss_exp', torch.mean(elementwise_loss[1] * weights[self.action_mask[1]]).detach().cpu(), self.episode)
+			self.writer.add_scalar('pruebas/loss_exp', torch.mean(elementwise_loss[0] * weights[self.action_mask[0]]).detach().cpu(), self.episode)
+			self.writer.add_scalar('pruebas/loss_clean', torch.mean(elementwise_loss[1] * weights[self.action_mask[1]]).detach().cpu(), self.episode)
 			if self.weighting_method is not None:
 				elementwise_loss = extra_outputs['weights'][0]*elementwise_loss[0] + extra_outputs['weights'][1]*elementwise_loss[1]
 			else:
@@ -376,8 +384,9 @@ class MultiAgentDuelingDQNAgent:
 		self.optimizer.step()
 
 		# PER: update priorities
+		weights_ = [1,1]
 		for i in range(len(elementwise_loss)):
-			loss_for_prior = elementwise_loss[i].detach().cpu().numpy()
+			loss_for_prior = elementwise_loss[i].detach().cpu().numpy()*weights_[i]
 			new_priorities = loss_for_prior + self.prior_eps
 			self.memory.update_priorities(np.asarray(indices)[self.action_mask[i]].tolist(), new_priorities)
    
@@ -448,7 +457,7 @@ class MultiAgentDuelingDQNAgent:
 		# Reset metrics #
 		episodic_reward_vector = []
 		record = np.array([-np.inf, -np.inf])
-		mean_record = -np.inf
+		mean_clean_record = -np.inf
 		max_movements = self.env.distance_budget
 		for episode in trange(1, int(episodes) + 1):
 
@@ -544,29 +553,10 @@ class MultiAgentDuelingDQNAgent:
 					episodic_reward_vector.append(self.episodic_reward)
 					self.episode += 1
 
-					self.writer.add_scalar('train/fleet_collisions', self.env.fleet.fleet_collisions, self.episode)
+					self.writer.add_scalar('train/trash_cleaned', self.env.percentage_of_trash_cleaned, self.episode)
 					# Log progress
 					self.log_data()
 
-					# Save policy if is better on average
-					mean_episodic_reward = np.mean(episodic_reward_vector[-50:], axis=0)
-					mean_reward = np.mean(mean_episodic_reward)
-					if mean_episodic_reward[0] > record[0]:
-						print(f"New best policy with mean information reward of {mean_episodic_reward[0]}")
-						print("Saving model in " + self.writer.log_dir)
-						record[0] = mean_episodic_reward[0]
-						self.save_model(name='BestPolicy_reward_information.pth')
-
-					if mean_episodic_reward[1] > record[1]:
-						print(f"New best policy with mean exploration reward of {mean_episodic_reward[1]}")
-						print("Saving model in " + self.writer.log_dir)
-						record[1] = mean_episodic_reward[1]
-						self.save_model(name='BestPolicy_reward_exploration.pth')
-					if mean_reward > mean_record:
-						print(f"New best policy with mean reward of {mean_reward}")
-						print("Saving model in " + self.writer.log_dir)
-						mean_record = mean_reward
-						self.save_model(name='BestPolicy.pth')
 				# If training is ready
 				if len(self.memory) >= self.batch_size and episode >= self.learning_starts:
 
@@ -583,18 +573,38 @@ class MultiAgentDuelingDQNAgent:
 					elif episode % self.target_update == 0 and all(done.values()):
 						self._target_hard_update()
 
-			if self.save_every is not None:
+			if self.save_every is not None and False:
 				if episode % self.save_every == 0:
 					self.save_model(name=f'Episode_{episode}_Policy.pth')
 
 			if self.eval_every is not None:
 				if episode % self.eval_every == 0:
-					mean_reward_information, mean_reward_exploration, mean_reward, mean_length, mean_collisions = self.evaluate_agents(self.eval_episodes)
-					self.writer.add_scalar('test/accumulated_reward_information', mean_reward_information, self.episode)
+					mean_reward_exploration, mean_reward_cleaning, mean_reward, mean_length, total_n_trash_cleaned = self.evaluate_agents(self.eval_episodes)
 					self.writer.add_scalar('test/accumulated_reward_exploration', mean_reward_exploration, self.episode)
+					self.writer.add_scalar('test/accumulated_reward_cleaning', mean_reward_cleaning, self.episode)
 					self.writer.add_scalar('test/accumulated_reward', mean_reward, self.episode)
 					self.writer.add_scalar('test/accumulated_length', mean_length, self.episode)
-					self.writer.add_scalar('test/fleet_collisions', mean_collisions, self.episode)
+					self.writer.add_scalar('test/trash_cleaned', total_n_trash_cleaned, self.episode)
+					# Save policy if is better on average
+					mean_episodic_reward = np.mean(episodic_reward_vector[-50:], axis=0)
+					mean_reward = np.mean(mean_episodic_reward)
+     
+					if mean_reward_exploration > record[0]:
+						print(f"New best policy with mean exploration reward of {mean_reward_exploration}")
+						print("Saving model in " + self.writer.log_dir)
+						record[0] = mean_reward_exploration
+						self.save_model(name='BestPolicy_reward_exploration.pth')
+
+					if mean_reward_cleaning > record[1]:
+						print(f"New best policy with mean cleaning reward of {mean_reward_cleaning}")
+						print("Saving model in " + self.writer.log_dir)
+						record[1] = mean_reward_cleaning
+						self.save_model(name='BestPolicy_reward_cleaning.pth')
+					if total_n_trash_cleaned > mean_clean_record:
+						print(f"New best policy with mean trash cleaned of {total_n_trash_cleaned} \%")
+						print("Saving model in " + self.writer.log_dir)
+						mean_clean_record = total_n_trash_cleaned
+						self.save_model(name='BestCleaningPolicy.pth')
      
 			
 
@@ -756,8 +766,8 @@ class MultiAgentDuelingDQNAgent:
 		if self.use_nu:
 			self.writer.add_scalar('train/nu', self.nu, self.episode)
 
-		self.writer.add_scalar('train/accumulated_reward_information', self.episodic_reward[0], self.episode)
-		self.writer.add_scalar('train/accumulated_reward_exploration', self.episodic_reward[1], self.episode)
+		self.writer.add_scalar('train/accumulated_reward_exploration', self.episodic_reward[0], self.episode)
+		self.writer.add_scalar('train/accumulated_reward_cleaning', self.episodic_reward[1], self.episode)
 		self.writer.add_scalar('train/accumulated_length', self.episodic_length, self.episode)
 
 		self.writer.flush()
@@ -777,7 +787,7 @@ class MultiAgentDuelingDQNAgent:
 		total_reward_information = 0
 		total_reward_exploration = 0
 		total_length = 0
-		total_collisions = 0
+		total_n_trash_cleaned = 0
 		max_movements = self.env.distance_budget
 		max_coll_ant=self.env.max_collisions
 		self.env.max_collisions=np.inf
@@ -827,14 +837,14 @@ class MultiAgentDuelingDQNAgent:
 				rewards = np.asarray(list(reward.values()))
 				total_reward_information += np.sum(rewards[:,0])
 				total_reward_exploration += np.sum(rewards[:,1])
-			total_collisions += self.env.fleet.fleet_collisions
+			total_n_trash_cleaned += self.env.percentage_of_trash_cleaned
 		total_reward += total_reward_exploration + total_reward_information
 		self.dqn.train()
 		self.env.max_collisions = max_coll_ant
 		self.epsilon = epsilon
 		# Return the average reward, average length
 
-		return total_reward_information / eval_episodes, total_reward_exploration / eval_episodes, total_reward / eval_episodes, total_length / eval_episodes, total_collisions/eval_episodes
+		return total_reward_information / eval_episodes, total_reward_exploration / eval_episodes, total_reward / eval_episodes, total_length / eval_episodes, total_n_trash_cleaned/eval_episodes
 
 	def write_experiment_config(self):
 		""" Write experiment and environment variables in a json file """

@@ -403,7 +403,7 @@ class MultiAgentPatrolling(gym.Env):
 		self.min_percentage_of_trash_found = 0
 		self.percentage_of_trash_cleaned = 0
 		self.percentage_of_map_visited = 0
-		self.n_of_trash = np.sum(self.gt.map > 0)	
+		self.n_of_trash = np.sum(self.gt.number_of_trash_elements_in_each_spot)	
 		self.update_metrics()
     
 		return self.state if self.frame_stacking is None else self.frame_stacking.process(self.state)
@@ -584,9 +584,16 @@ class MultiAgentPatrolling(gym.Env):
 			[np.sum(self.fleet.new_visited_mask[veh.detection_mask.astype(bool)].astype(np.float32) 
                     / self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]) for veh in self.fleet.vehicles]
 		)
-		rewards_cleaning = trash_monitoring_reward + self.n_trash_cleaned 
-      			
-		rewards = np.vstack((rewards_cleaning, rewards_exploration)).T
+		#rewards_cleaning = trash_monitoring_reward + self.n_trash_cleaned 
+		"""rewards_cleaning = trash_monitoring_reward + self.n_trash_cleaned + np.array([
+      				np.sum(self.gt.normalized_filtered_map[veh.detection_mask.astype(bool)]
+                 			/ (np.sum(veh.detection_mask) * self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]))
+                		 for veh in self.fleet.vehicles])"""
+		rewards_cleaning = self.n_trash_cleaned + np.array([
+      				np.sum(self.gt.normalized_filtered_map[veh.detection_mask.astype(bool)]
+                 			/ (np.sum(veh.detection_mask) * self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]))
+                		 for veh in self.fleet.vehicles])
+		rewards = np.vstack((rewards_exploration, rewards_cleaning)).T
 		#print(rewards)
 		self.info = {}
 

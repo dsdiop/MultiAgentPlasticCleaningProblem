@@ -71,6 +71,9 @@ class WanderingAgent:
 		if self.action is not None:
 			opposite_action = self.opposite_action(self.action)
 			action_caused_collision[opposite_action] = True
+		if np.all(action_caused_collision):
+			opposite_action = self.opposite_action(self.action)
+			action_caused_collision[opposite_action] = False
 		action = self.rng.choice(np.where(np.logical_not(action_caused_collision))[0])
 
 		return action
