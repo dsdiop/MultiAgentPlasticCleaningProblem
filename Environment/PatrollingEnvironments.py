@@ -281,7 +281,7 @@ class MultiAgentPatrolling(gym.Env):
 		self.scenario_map = scenario_map
 		self.visitable_locations = np.vstack(np.where(self.scenario_map != 0)).T
 		self.number_of_agents = number_of_vehicles
-		self.action_space = gym.spaces.Discrete(17)
+		self.action_space = gym.spaces.Discrete(16)
 
 		# Initial positions
 		if fleet_initial_positions is None:
@@ -395,6 +395,7 @@ class MultiAgentPatrolling(gym.Env):
 		self.last_positions = [deque(maxlen=self.trail_length) for _ in range(self.number_of_agents)]
 		
 		self.n_trash_cleaned = np.array([0 for _ in range(self.number_of_agents)])
+		self.no_discovery_steps = np.zeros(self.number_of_agents)
 		# Update the state of the agents #
 		self.update_state()
 		# Metrics
@@ -455,13 +456,14 @@ class MultiAgentPatrolling(gym.Env):
 		action = {action_id: action[action_id] for action_id in range(self.number_of_agents) if self.active_agents[action_id]}
 		collision_mask = self.fleet.move(action)
 		self.n_trash_cleaned = np.array([0 for _ in range(self.number_of_agents)])
-		# Clean the trash if requested #
+		# Clean the trash if requested # --> Changed this to clean the trash if the agent is in a trash spot
+		
 		for agent_id in range(self.number_of_agents):
 			if self.active_agents[agent_id]:
-				if action[agent_id] == 8:
-					n_trash_to_clean = 100
-					if self.gt.map[self.fleet.vehicles[agent_id].position[0],self.fleet.vehicles[agent_id].position[1]] > 0:
-						self.n_trash_cleaned[agent_id] = self.gt.clean_particles(self.fleet.vehicles[agent_id].position, n_trash_to_clean)
+				#if action[agent_id] == 8:
+				n_trash_to_clean = 100
+				if self.gt.map[self.fleet.vehicles[agent_id].position[0],self.fleet.vehicles[agent_id].position[1]] > 0:
+					self.n_trash_cleaned[agent_id] = self.gt.clean_particles(self.fleet.vehicles[agent_id].position, n_trash_to_clean)
        # Update model #
 		if self.miopic:
 			self.update_model(action)
@@ -593,6 +595,27 @@ class MultiAgentPatrolling(gym.Env):
       				np.sum(self.gt.normalized_filtered_map[veh.detection_mask.astype(bool)]
                  			/ (np.sum(veh.detection_mask) * self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]))
                 		 for veh in self.fleet.vehicles])
+		if self.reward_type == 'Negative rewards':
+			rewards_exploration = trash_monitoring_reward + np.array(
+			[np.sum(self.fleet.new_visited_mask[veh.detection_mask.astype(bool)].astype(np.float32) 
+                    / self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]) for veh in self.fleet.vehicles])
+   
+			# if an agent has spent a step without discovering anything, 
+   			# it will receive a negative reward that will increase over time, 
+      		# it will be reset when it discovers something	
+			for idx, agent in enumerate(self.fleet.vehicles):
+				if self.percentage_of_map_visited == 1:
+					continue
+				if self.active_agents[idx]:
+					if np.sum(self.fleet.new_visited_mask[agent.detection_mask.astype(bool)]) == 0:
+						self.no_discovery_steps[idx] += 1
+					else:
+						self.no_discovery_steps[idx] = 0
+					rewards_exploration[idx] -= (10/self.min_movements_if_nocollisions) * self.no_discovery_steps[idx]
+			rewards_cleaning = self.n_trash_cleaned - (1 - np.array([
+						np.sum(self.gt.normalized_filtered_map[veh.detection_mask.astype(bool)]
+								/ (np.sum(veh.detection_mask) * self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]))
+							for veh in self.fleet.vehicles]))
 		rewards = np.vstack((rewards_exploration, rewards_cleaning)).T
 		#print(rewards)
 		self.info = {}
@@ -655,8 +678,8 @@ if __name__ == '__main__':
 								number_of_vehicles=N,
 								seed=0,
 								miopic=True,
-								detection_length=2,
-								movement_length=2,
+								detection_length=1,
+								movement_length=1,
 								max_collisions=500,
 								ground_truth_type='macro_plastic',
 								obstacles=False,
@@ -669,7 +692,7 @@ if __name__ == '__main__':
 		reads = [2,4,9]
 		#lengths = [20,100,33]
 		gts = []
-		n_actions = 9
+		n_actions = 8
 		for k in trange(10):
 			env.reset()
 			lengths = 0
@@ -691,6 +714,9 @@ if __name__ == '__main__':
 				env.render()
 				R.append(list(r.values()))
 				lengths += 1
+				for ke in range(N):
+					if env.n_trash_cleaned[ke] > 0:
+						print(env.n_trash_cleaned[ke])
 				if k in reads:
 					if lengths in [20,100,33]:
 						gts.append(env.gt.read())

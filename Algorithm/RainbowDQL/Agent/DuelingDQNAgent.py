@@ -258,10 +258,10 @@ class MultiAgentDuelingDQNAgent:
 				q_values, selected_action = self.safe_masking_module.mask_action(q_values =np.random.rand(self.action_dim[0]))
 			else:
 				q_values, selected_action = self.safe_masking_module.mask_action(q_values =np.random.rand(self.action_dim[1]))
-				# if there is trash in the position of the agent, the agent will pick it up
+				"""# if there is trash in the position of the agent, the agent will pick it up
 				if self.env.gt.map[int(position[0]), int(position[1])] > 0:
 					selected_action = -1
-					q_values[selected_action] = np.inf
+					q_values[selected_action] = np.inf"""
 		else:
 			q_values = self.dqn(torch.FloatTensor(state).unsqueeze(0).to(self.device)).detach().cpu().numpy()
 			if condition:
@@ -270,14 +270,14 @@ class MultiAgentDuelingDQNAgent:
 				q_values = q_values.squeeze(0)[self.action_dim[0]:]
     
 			q_values, selected_action = self.safe_masking_module.mask_action(q_values = q_values.flatten())
-		# do not clean when there is no trash
-		if not condition:
+		"""# do not clean when there is no trash
+		if not condition and False:
 			if not self.env.gt.map[int(position[0]), int(position[1])] > 0:
 				selected_action = -1
 				q_values[selected_action] = -np.inf 
 			else:
 				selected_action = -1
-				q_values[selected_action] = np.inf 
+				q_values[selected_action] = np.inf """
                                                         
 		if self.consensus:
 			self.q_values4consensus[agent_id] = q_values
@@ -373,8 +373,8 @@ class MultiAgentDuelingDQNAgent:
 			if self.weighting_method is not None:
 				elementwise_loss = extra_outputs['weights'][0]*elementwise_loss[0] + extra_outputs['weights'][1]*elementwise_loss[1]
 			else:
-				#elementwise_loss = elementwise_loss[0] + elementwise_loss[1]
-				pass
+				elementwise_loss = elementwise_loss[0] + elementwise_loss[1]
+				
 		else:
 			elementwise_loss = self._compute_dqn_loss(samples)
 			loss = torch.mean(elementwise_loss * weights)
@@ -384,15 +384,15 @@ class MultiAgentDuelingDQNAgent:
 		self.optimizer.step()
 
 		# PER: update priorities
-		weights_ = [1,1]
+		"""weights_ = [1,1]
 		for i in range(len(elementwise_loss)):
 			loss_for_prior = elementwise_loss[i].detach().cpu().numpy()*weights_[i]
 			new_priorities = loss_for_prior + self.prior_eps
-			self.memory.update_priorities(np.asarray(indices)[self.action_mask[i]].tolist(), new_priorities)
+			self.memory.update_priorities(np.asarray(indices)[self.action_mask[i]].tolist(), new_priorities)"""
    
-		"""loss_for_prior = elementwise_loss.detach().cpu().numpy()
+		loss_for_prior = elementwise_loss.detach().cpu().numpy()
 		new_priorities = loss_for_prior + self.prior_eps
-		self.memory.update_priorities(indices, new_priorities)"""
+		self.memory.update_priorities(indices, new_priorities)
 		
 		# Sample new noisy distribution
 		if self.noisy:
@@ -515,7 +515,7 @@ class MultiAgentDuelingDQNAgent:
 				next_state, reward, done = self.step(actions)
 
 				for key, lista in reward.items():
-					if -1 in lista:
+					if -1 in lista and False:
 						print(f"En la lista '{key}' se encontró el valor -1.")
 						print('Actions: ',actions)
 						print('Positions: ', self.env.fleet.get_positions())
