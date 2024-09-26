@@ -404,10 +404,10 @@ class MultiAgentDuelingDQNAgent:
 	@staticmethod
 	def anneal_nu(p, p1=[0., 1], p2=[0.5, 1.], p3=[0.5, 0.], p4=[1., 0.]):
 
-		if p <= p2[0]:
+		if p <= p2[0] and p1[0]!=p2[0]:
 			first_p = p1
 			second_p = p2
-		elif p <= p3[0]:
+		elif p <= p3[0] and p2[0]!=p3[0]:
 			first_p = p2
 			second_p = p3
 		elif p <= p4[0]:
