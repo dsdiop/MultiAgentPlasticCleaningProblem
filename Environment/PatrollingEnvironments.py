@@ -11,6 +11,7 @@ from scipy.spatial import distance_matrix
 import matplotlib
 import json
 from collections import deque
+from scipy.ndimage import gaussian_filter
 background_colormap = matplotlib.colors.LinearSegmentedColormap.from_list("", ["sienna","dodgerblue"])
 
 class DiscreteVehicle:
@@ -329,6 +330,7 @@ class MultiAgentPatrolling(gym.Env):
 
 		""" Model attributes """
 		self.known_information = None
+		self.normalized_known_information = None
 		self.macro_plastic_gt = None
 		self.model = None
 		self.inside_obstacles_map = None
@@ -428,6 +430,12 @@ class MultiAgentPatrolling(gym.Env):
 			self.known_information[np.where(self.fleet.historic_visited_mask)] = self.model[np.where(self.fleet.historic_visited_mask)]
 		else:
 			self.known_information = self.gt.read()
+		
+		# Normalize
+		if np.max(self.known_information) == 0:
+			self.normalized_known_information = np.zeros_like(self.known_information)
+		else:
+			self.normalized_known_information = (self.known_information-np.min(self.known_information))/(np.max(self.known_information)-np.min(self.known_information))
 
 		for i in range(self.number_of_agents):
 	
@@ -441,7 +449,7 @@ class MultiAgentPatrolling(gym.Env):
 	
 			agent_observation_of_fleet = self.fleet.redundancy_mask.copy() - self.fleet.vehicles[i].detection_mask.copy()
 			state[i] = np.concatenate((
-				self.known_information[np.newaxis],
+				self.normalized_known_information[np.newaxis],
 				agent_observation_of_position[np.newaxis],
 				agent_observation_of_fleet[np.newaxis]
 			))
@@ -578,24 +586,26 @@ class MultiAgentPatrolling(gym.Env):
 		plt.pause(0.01)
 
 	def reward_function(self, collision_mask, actions):
-		""" Compute the reward for the agents """
+		
 		trash_monitoring_reward = np.array([np.sum( np.clip(self.gt.map[veh.detection_mask.astype(bool)],0,1)
-         		/ (np.sum(veh.detection_mask) * self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]))
-         			for veh in self.fleet.vehicles])
-		rewards_exploration = trash_monitoring_reward + np.array(
-			[np.sum(self.fleet.new_visited_mask[veh.detection_mask.astype(bool)].astype(np.float32) 
-                    / self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]) for veh in self.fleet.vehicles]
-		)
-		#rewards_cleaning = trash_monitoring_reward + self.n_trash_cleaned 
-		"""rewards_cleaning = trash_monitoring_reward + self.n_trash_cleaned + np.array([
-      				np.sum(self.gt.normalized_filtered_map[veh.detection_mask.astype(bool)]
-                 			/ (np.sum(veh.detection_mask) * self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]))
-                		 for veh in self.fleet.vehicles])"""
-		rewards_cleaning = self.n_trash_cleaned + np.array([
-      				np.sum(self.gt.normalized_filtered_map[veh.detection_mask.astype(bool)]
-                 			/ (np.sum(veh.detection_mask) * self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]))
-                		 for veh in self.fleet.vehicles])
-		if self.reward_type == 'Negative rewards':
+				/ (np.sum(veh.detection_mask) * self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]))
+					for veh in self.fleet.vehicles])
+		if 'Double reward' in self.reward_type:
+			""" Compute the reward for the agents """
+			rewards_exploration = trash_monitoring_reward + np.array(
+				[np.sum(self.fleet.new_visited_mask[veh.detection_mask.astype(bool)].astype(np.float32) 
+						/ self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]) for veh in self.fleet.vehicles]
+			)
+			#rewards_cleaning = trash_monitoring_reward + self.n_trash_cleaned 
+			"""rewards_cleaning = trash_monitoring_reward + self.n_trash_cleaned + np.array([
+						np.sum(self.gt.normalized_filtered_map[veh.detection_mask.astype(bool)]
+								/ (np.sum(veh.detection_mask) * self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]))
+								for veh in self.fleet.vehicles])"""
+			rewards_cleaning = self.n_trash_cleaned + np.array([
+						np.sum(self.gt.normalized_filtered_map[veh.detection_mask.astype(bool)]
+								/ (np.sum(veh.detection_mask) * self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]))
+								for veh in self.fleet.vehicles])
+		if 'Negative rewards' in  self.reward_type:
 			rewards_exploration = trash_monitoring_reward + np.array(
 			[np.sum(self.fleet.new_visited_mask[veh.detection_mask.astype(bool)].astype(np.float32) 
                     / self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]) for veh in self.fleet.vehicles])
@@ -611,11 +621,18 @@ class MultiAgentPatrolling(gym.Env):
 						self.no_discovery_steps[idx] += 1
 					else:
 						self.no_discovery_steps[idx] = 0
-					rewards_exploration[idx] -= (10/self.min_movements_if_nocollisions) * self.no_discovery_steps[idx]
-			rewards_cleaning = self.n_trash_cleaned - (1 - np.array([
-						np.sum(self.gt.normalized_filtered_map[veh.detection_mask.astype(bool)]
-								/ (np.sum(veh.detection_mask) * self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]))
-							for veh in self.fleet.vehicles]))
+					rewards_exploration[idx] -= (1/self.min_movements_if_nocollisions) * self.no_discovery_steps[idx]
+			filtered_map = gaussian_filter(self.normalized_known_information, 5, mode = 'constant', cval=0, radius = 5) * self.scenario_map
+			
+			if self.percentage_of_trash_cleaned == 1 and np.sum(filtered_map)==0:
+				rewards_cleaning = np.ones_like(rewards_exploration)
+			else:
+			#model_change = np.array([np.sum(self.gt.map[veh.detection_mask.astype(bool)] - 
+				rewards_cleaning = self.n_trash_cleaned - (1 - np.array([
+							np.sum(filtered_map[veh.detection_mask.astype(bool)]
+									/ (np.sum(veh.detection_mask) * self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]))
+								for veh in self.fleet.vehicles]))
+
 		rewards = np.vstack((rewards_exploration, rewards_cleaning)).T
 		#print(rewards)
 		self.info = {}
