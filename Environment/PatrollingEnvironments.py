@@ -622,8 +622,8 @@ class MultiAgentPatrolling(gym.Env):
 					else:
 						self.no_discovery_steps[idx] = 0
 					rewards_exploration[idx] -= (1/self.min_movements_if_nocollisions) * self.no_discovery_steps[idx]
-			filtered_map = gaussian_filter(self.normalized_known_information, 5, mode = 'constant', cval=0, radius = 5) * self.scenario_map
-			
+			filtered_map = gaussian_filter(self.normalized_known_information, 5, mode = 'constant', cval=0, radius = None) * self.scenario_map
+			filtered_map = (filtered_map - np.min(filtered_map)) / (np.max(filtered_map) - np.min(filtered_map) + 1e-8)
 			if self.percentage_of_trash_cleaned == 1 and np.sum(filtered_map)==0:
 				rewards_cleaning = np.ones_like(rewards_exploration)
 			else:
@@ -632,7 +632,11 @@ class MultiAgentPatrolling(gym.Env):
 							np.sum(filtered_map[veh.detection_mask.astype(bool)]
 									/ (np.sum(veh.detection_mask) * self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]))
 								for veh in self.fleet.vehicles]))
-
+			# when model change, the agent will receive a positive reward
+   
+			if self.model_ant is not None:
+				model_change = np.array([np.sum(np.abs(self.model[veh.detection_mask.astype(bool)] - self.model_ant[veh.detection_mask.astype(bool)])) for veh in self.fleet.vehicles])
+				rewards_cleaning += model_change
 		rewards = np.vstack((rewards_exploration, rewards_cleaning)).T
 		#print(rewards)
 		self.info = {}

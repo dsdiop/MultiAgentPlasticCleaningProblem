@@ -137,14 +137,16 @@ class macro_plastic:
         self.particles = np.delete(self.particles, particles_to_remove, axis=0)
         self.discretize_map()
         return len(particles_to_remove)
+    
     def discretize_map(self):
         self.map[:,:] = 0.0
         self.discretized_particles = np.zeros_like(self.particles).astype(int)
         for i, particle in enumerate(self.particles):
             self.discretized_particles[i] = np.round(particle).astype(int)
             self.map[self.discretized_particles[i][0], self.discretized_particles[i][1]] += 1.0
-        
-        self.filtered_map = gaussian_filter(self.map, 10, mode = 'constant', cval=0) * self.grid
+            
+    #def apply_gaussian_filter_and_normalize(self):    
+        self.filtered_map = gaussian_filter(self.map, 5, mode = 'constant', cval=0, radius = None) * self.grid
         if np.max(self.filtered_map) == 0:
             self.normalized_filtered_map = np.zeros_like(self.filtered_map)
         else:
@@ -154,7 +156,7 @@ if __name__ == '__main__':
 
     import matplotlib.pyplot as plt
 
-    gt = macro_plastic(np.genfromtxt(f'{data_path}/Maps/malaga_port.csv', delimiter=','), dt=0.2, seed=3)
+    gt = macro_plastic(np.genfromtxt(f'{data_path}/Maps/malaga_port.csv', delimiter=','), dt=0.2, seed=10)
 
     m = gt.reset()
     gt.render()
@@ -164,6 +166,7 @@ if __name__ == '__main__':
         #m = gt.reset()
         gt.step()
         print(str(_))
+
         gt.render()
         plt.pause(0.5)
 
