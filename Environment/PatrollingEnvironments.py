@@ -12,6 +12,8 @@ import matplotlib
 import json
 from collections import deque
 from scipy.ndimage import gaussian_filter
+import heapq
+
 background_colormap = matplotlib.colors.LinearSegmentedColormap.from_list("", ["sienna","dodgerblue"])
 
 class DiscreteVehicle:
@@ -283,7 +285,10 @@ class MultiAgentPatrolling(gym.Env):
 		self.visitable_locations = np.vstack(np.where(self.scenario_map != 0)).T
 		self.number_of_agents = number_of_vehicles
 		self.action_space = gym.spaces.Discrete(16)
-
+		# Graph and distance maps
+		self.graph = self.grid_to_graph()
+		self.distance_map, self.predecessor_map = self.calculate_distance_and_predecessor_maps()
+  
 		# Initial positions
 		if fleet_initial_positions is None:
 			self.random_inititial_positions = True
@@ -359,7 +364,7 @@ class MultiAgentPatrolling(gym.Env):
 		self.last_positions = [deque(maxlen=self.trail_length) for _ in range(self.number_of_agents)]
 		# Metrics
 		self.steps = 0
-		self.total_n_trash_cleaned = 0
+		self.total_n_trash_cleaned = np.zeros(self.number_of_agents)
 		self.min_percentage_of_trash_found = 0
 		self.percentage_of_trash_cleaned = 0
 		self.percentage_of_map_visited = 0
@@ -402,7 +407,7 @@ class MultiAgentPatrolling(gym.Env):
 		self.update_state()
 		# Metrics
 		self.steps = 0
-		self.total_n_trash_cleaned = 0
+		self.total_n_trash_cleaned = np.zeros(self.number_of_agents)
 		self.min_percentage_of_trash_found = 0
 		self.percentage_of_trash_cleaned = 0
 		self.percentage_of_map_visited = 0
@@ -511,14 +516,13 @@ class MultiAgentPatrolling(gym.Env):
     
 	def update_metrics(self):
 		""" Update the metrics """
-		self.total_n_trash_cleaned += np.sum(self.n_trash_cleaned)
-		self.percentage_of_trash_cleaned = self.total_n_trash_cleaned / self.n_of_trash
+		self.total_n_trash_cleaned += self.n_trash_cleaned
+		self.percentage_of_trash_cleaned = np.sum(self.total_n_trash_cleaned) / self.n_of_trash
 		self.min_percentage_of_trash_found = max(self.min_percentage_of_trash_found,
                                               np.sum(self.gt.map[self.fleet.historic_visited_mask.astype(bool)] > 0) / self.n_of_trash)
 		self.percentage_of_map_visited = np.sum(self.fleet.historic_visited_mask) / np.sum(self.scenario_map)
 
-
-        
+    
 	def render(self):
 
 		import matplotlib.pyplot as plt
@@ -605,7 +609,7 @@ class MultiAgentPatrolling(gym.Env):
 						np.sum(self.gt.normalized_filtered_map[veh.detection_mask.astype(bool)]
 								/ (np.sum(veh.detection_mask) * self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]))
 								for veh in self.fleet.vehicles])
-		if 'Negative rewards' in  self.reward_type:
+		if 'Negative reward' in  self.reward_type:
 			rewards_exploration = trash_monitoring_reward + np.array(
 			[np.sum(self.fleet.new_visited_mask[veh.detection_mask.astype(bool)].astype(np.float32) 
                     / self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]) for veh in self.fleet.vehicles])
@@ -622,6 +626,7 @@ class MultiAgentPatrolling(gym.Env):
 					else:
 						self.no_discovery_steps[idx] = 0
 					rewards_exploration[idx] -= (1/self.min_movements_if_nocollisions) * self.no_discovery_steps[idx]
+			
 			filtered_map = gaussian_filter(self.normalized_known_information, 5, mode = 'constant', cval=0, radius = None) * self.scenario_map
 			filtered_map = (filtered_map - np.min(filtered_map)) / (np.max(filtered_map) - np.min(filtered_map) + 1e-8)
 			if self.percentage_of_trash_cleaned == 1 and np.sum(filtered_map)==0:
@@ -631,18 +636,129 @@ class MultiAgentPatrolling(gym.Env):
 				rewards_cleaning = self.n_trash_cleaned - (1 - np.array([
 							np.sum(filtered_map[veh.detection_mask.astype(bool)]
 									/ (np.sum(veh.detection_mask) * self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]))
-								for veh in self.fleet.vehicles]))
+								for i,veh in enumerate(self.fleet.vehicles)]))
 			# when model change, the agent will receive a positive reward
    
 			if self.model_ant is not None:
 				model_change = np.array([np.sum(np.abs(self.model[veh.detection_mask.astype(bool)] - self.model_ant[veh.detection_mask.astype(bool)])) for veh in self.fleet.vehicles])
 				rewards_cleaning += model_change
+		if 'Distance Field' in self.reward_type:
+			rewards_exploration = np.array(
+			[np.sum(self.fleet.new_visited_mask[veh.detection_mask.astype(bool)].astype(np.float32) 
+                    / self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]) for veh in self.fleet.vehicles])
+   
+			# if an agent has spent a step without discovering anything, 
+   			# it will receive a negative reward that will increase over time, 
+      		# it will be reset when it discovers something	
+			for idx, agent in enumerate(self.fleet.vehicles):
+				if self.percentage_of_map_visited == 1:
+					continue
+				if self.active_agents[idx]:
+					if np.sum(self.fleet.new_visited_mask[agent.detection_mask.astype(bool)]) == 0:
+						self.no_discovery_steps[idx] += 1
+					else:
+						self.no_discovery_steps[idx] = 0
+					rewards_exploration[idx] -= (1/self.min_movements_if_nocollisions) * self.no_discovery_steps[idx]
+			
+			filtered_map = self.calculate_field_map(self.normalized_known_information, self.scenario_map, alpha=1.0)
+			filtered_map = (filtered_map - np.min(filtered_map)) / (np.max(filtered_map) - np.min(filtered_map) + 1e-8)	
+			if self.percentage_of_trash_cleaned == 1 and np.sum(filtered_map)==0:
+				rewards_cleaning = np.ones_like(rewards_exploration)
+			else:
+			#model_change = np.array([np.sum(self.gt.map[veh.detection_mask.astype(bool)] - 
+				rewards_cleaning = self.n_trash_cleaned - (1 - np.array([
+							(self.total_n_trash_cleaned[i]+1)*np.sum(filtered_map[veh.detection_mask.astype(bool)]
+									/ (np.sum(veh.detection_mask) * self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]))
+								for i,veh in enumerate(self.fleet.vehicles)]))
+			
+      
 		rewards = np.vstack((rewards_exploration, rewards_cleaning)).T
 		#print(rewards)
 		self.info = {}
 
 		return {agent_id: rewards[agent_id] for agent_id in range(self.number_of_agents) if
 				self.active_agents[agent_id]}
+
+	def dijkstra(self, start):
+		# Initialize distances and priority queue
+		distances = {vertex: float('infinity') for vertex in self.graph}
+		distances[start] = 0
+		priority_queue = [(0, start)]
+		predecessors = {vertex: None for vertex in self.graph}
+		
+		while priority_queue:
+			current_distance, current_vertex = heapq.heappop(priority_queue)
+
+			if current_distance > distances[current_vertex]:
+				continue
+
+			for neighbor, weight in self.graph[current_vertex].items():
+				distance = current_distance + weight
+
+				if distance < distances[neighbor]:
+					distances[neighbor] = distance
+					predecessors[neighbor] = current_vertex
+					heapq.heappush(priority_queue, (distance, neighbor))
+					
+		return distances, predecessors
+
+	def grid_to_graph(self,directions=None):
+		rows = self.scenario_map.shape[0]
+		cols = self.scenario_map.shape[1]
+		graph = {}
+
+		# Directions for 8 adjacent cells (including diagonals)
+		if directions is None:
+			directions = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+		for x in range(rows):
+			for y in range(cols):
+				if self.scenario_map[x,y] == 1:  # Assuming 1 represents a navigable cell
+					graph[(x, y)] = {}
+					for dx, dy in directions:
+						nx, ny = x + dx, y + dy
+						if 0 <= nx < rows and 0 <= ny < cols and self.scenario_map[nx,ny] == 1:
+							if self.isnot_reachable(self.scenario_map, (x, y), (nx, ny)):
+								continue
+							graph[(x, y)][(nx, ny)] = np.linalg.norm(np.array([x,y]) - np.array([nx,ny]))  # Assuming all edges have a weight of 1
+
+		return graph
+
+	def calculate_distance_and_predecessor_maps(self):
+		""" Calculate the distance and predecessor maps for each pixel """
+		distance_map = {}
+		predecessor_map = {}
+		
+		for pos in list(self.graph.keys()):
+			i,j = pos
+			distances, predecessors = self.dijkstra((i, j))
+			distance_map[(i, j)] = distances
+			predecessor_map[(i, j)] = predecessors
+				
+		return distance_map, predecessor_map
+
+	def proportional_distance_value(self, map_values, position, alpha=1.0):
+
+		distances = self.distance_map[position]
+		penalization = 0.0
+		# Calculate penalization
+		for pos in np.argwhere(map_values > 0.):
+			i,j = pos
+			if distances[(i, j)] > 0:  # Penalize interesting pixels
+				penalization += alpha * (map_values[i][j] / distances[(i, j)])
+		
+		return penalization
+
+	def calculate_field_map(self,map_values, mask, alpha=1.0):
+     
+		field_map = np.zeros_like(mask, dtype=float)
+
+		# Calculate the penalization for pixels where mask is True
+		for pos in np.argwhere(mask):
+			field_map[tuple(pos)] = self.proportional_distance_value(map_values, tuple(pos), alpha)
+
+		return field_map
+
 
 	def get_action_mask(self, ind=0):
 		""" Return an array of Bools (True means this action for the agent ind causes a collision) """
@@ -676,13 +792,32 @@ class MultiAgentPatrolling(gym.Env):
 		with open(path + '/environment_config.json', 'w') as f:
 			json.dump(environment_configuration, f, indent=4)
 
+	@staticmethod
+	def isnot_reachable(grid, current_position, next_position):
+		""" Check if the next position is reachable or navigable """
+		if grid[int(next_position[0]), int(next_position[1])] == 0:
+			return True 
+		x, y = next_position
+		dx = x - current_position[0]
+		dy = y - current_position[1]
+		steps = max(abs(dx), abs(dy))
+		dx = dx / steps if steps != 0 else 0
+		dy = dy / steps if steps != 0 else 0
+		reachable_positions = True
+		for step in range(1, steps + 1):
+			px = round(current_position[0] + dx * step)
+			py = round(current_position[1] + dy * step)
+			if grid[px, py] != 1:
+				reachable_positions = False
+				break
 
+		return not reachable_positions
 
 if __name__ == '__main__':
 
 
-	sc_map = np.genfromtxt('Environment/Maps/example_map.csv', delimiter=',')
-	#sc_map = np.genfromtxt('Environment/Maps/malaga_port.csv', delimiter=',')
+	#sc_map = np.genfromtxt('Environment/Maps/example_map.csv', delimiter=',')
+	sc_map = np.genfromtxt('Environment/Maps/malaga_port.csv', delimiter=',')
 
 	N = 4
 	initial_positions = np.array([[12, 7], [14, 5], [16, 3], [18, 1]])[:N, :]
@@ -697,7 +832,7 @@ if __name__ == '__main__':
 								fleet_initial_positions=initial_positions,
 								distance_budget=200,
 								number_of_vehicles=N,
-								seed=0,
+								seed=43,
 								miopic=True,
 								detection_length=1,
 								movement_length=1,
@@ -706,7 +841,7 @@ if __name__ == '__main__':
 								obstacles=False,
 								frame_stacking=2,
 								state_index_stacking=(0,1,2),
-								reward_type='Double reward v2 v4',
+								reward_type='Distance Field',
 								convert_to_uint8=False,
 								trail_length = 20
 												)
