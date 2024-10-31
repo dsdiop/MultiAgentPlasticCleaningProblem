@@ -458,6 +458,7 @@ class MultiAgentDuelingDQNAgent:
 		episodic_reward_vector = []
 		record = np.array([-np.inf, -np.inf])
 		mean_clean_record = -np.inf
+		percentage_of_map_visited_record = -np.inf
 		max_movements = self.env.distance_budget
 		for episode in trange(1, int(episodes) + 1):
 
@@ -579,12 +580,13 @@ class MultiAgentDuelingDQNAgent:
 
 			if self.eval_every is not None:
 				if episode % self.eval_every == 0:
-					mean_reward_exploration, mean_reward_cleaning, mean_reward, mean_length, total_n_trash_cleaned = self.evaluate_agents(self.eval_episodes)
+					mean_reward_exploration, mean_reward_cleaning, mean_reward, mean_length, total_n_trash_cleaned, percentage_of_map_visited = self.evaluate_agents(self.eval_episodes)
 					self.writer.add_scalar('test/accumulated_reward_exploration', mean_reward_exploration, self.episode)
 					self.writer.add_scalar('test/accumulated_reward_cleaning', mean_reward_cleaning, self.episode)
 					self.writer.add_scalar('test/accumulated_reward', mean_reward, self.episode)
 					self.writer.add_scalar('test/accumulated_length', mean_length, self.episode)
 					self.writer.add_scalar('test/trash_cleaned', total_n_trash_cleaned, self.episode)
+					self.writer.add_scalar('test/percentage_of_map_visited', percentage_of_map_visited, self.episode)
 					# Save policy if is better on average
 					mean_episodic_reward = np.mean(episodic_reward_vector[-50:], axis=0)
 					mean_reward = np.mean(mean_episodic_reward)
@@ -593,18 +595,23 @@ class MultiAgentDuelingDQNAgent:
 						print(f"New best policy with mean exploration reward of {mean_reward_exploration}")
 						print("Saving model in " + self.writer.log_dir)
 						record[0] = mean_reward_exploration
-						self.save_model(name='BestPolicy_reward_exploration.pth')
+						self.save_model(name=f'BestPolicy_reward_exploration_episode_{episode}.pth')
+					if percentage_of_map_visited > percentage_of_map_visited_record:
+						print(f"New best policy with percentage of map visited of {mean_reward_exploration}")
+						print("Saving model in " + self.writer.log_dir)
+						percentage_of_map_visited_record = percentage_of_map_visited
+						self.save_model(name=f'BestPolicy_perc_map_visited_episode_{episode}.pth')
 
 					if mean_reward_cleaning > record[1]:
 						print(f"New best policy with mean cleaning reward of {mean_reward_cleaning}")
 						print("Saving model in " + self.writer.log_dir)
 						record[1] = mean_reward_cleaning
-						self.save_model(name='BestPolicy_reward_cleaning.pth')
+						self.save_model(name=f'BestPolicy_reward_cleaning_episode_{episode}.pth')
 					if total_n_trash_cleaned > mean_clean_record:
 						print(f"New best policy with mean trash cleaned of {total_n_trash_cleaned} \%")
 						print("Saving model in " + self.writer.log_dir)
 						mean_clean_record = total_n_trash_cleaned
-						self.save_model(name='BestCleaningPolicy.pth')
+						self.save_model(name=f'BestCleaningPolicy_episode_{episode}.pth')
      
 			
 
@@ -788,6 +795,7 @@ class MultiAgentDuelingDQNAgent:
 		total_reward_exploration = 0
 		total_length = 0
 		total_n_trash_cleaned = 0
+		percentage_of_map_visited = 0
 		max_movements = self.env.distance_budget
 		max_coll_ant=self.env.max_collisions
 		self.env.max_collisions=np.inf
@@ -838,13 +846,14 @@ class MultiAgentDuelingDQNAgent:
 				total_reward_information += np.sum(rewards[:,0])
 				total_reward_exploration += np.sum(rewards[:,1])
 			total_n_trash_cleaned += self.env.percentage_of_trash_cleaned
+			percentage_of_map_visited += self.env.percentage_of_map_visited
 		total_reward += total_reward_exploration + total_reward_information
 		self.dqn.train()
 		self.env.max_collisions = max_coll_ant
 		self.epsilon = epsilon
 		# Return the average reward, average length
-
-		return total_reward_information / eval_episodes, total_reward_exploration / eval_episodes, total_reward / eval_episodes, total_length / eval_episodes, total_n_trash_cleaned/eval_episodes
+		percentage_of_map_visited = percentage_of_map_visited/eval_episodes
+		return total_reward_information / eval_episodes, total_reward_exploration / eval_episodes, total_reward / eval_episodes, total_length / eval_episodes, total_n_trash_cleaned/eval_episodes, percentage_of_map_visited
 
 	def write_experiment_config(self):
 		""" Write experiment and environment variables in a json file """

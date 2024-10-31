@@ -15,7 +15,7 @@ macroplastic_colormap = matplotlib.colors.LinearSegmentedColormap.from_list("", 
 
 class macro_plastic:
 
-    def __init__(self, grid: np.ndarray, dt = 0.2, max_number_of_pollution_spots = 3, max_number_of_trash_elements_per_spot = 100, seed = 0) -> None:
+    def __init__(self, grid: np.ndarray, dt = 0.1, max_number_of_pollution_spots = 3, total_trash_elements = 100, seed = 0) -> None:
         """ Generador de ground truths de plásticos con dinámica """
         self.seed = seed
         self.rng = np.random.default_rng(seed=self.seed) # random number generator, it's better than set a np.random.seed() (https://builtin.com/data-science/numpy-random-seed)
@@ -36,7 +36,7 @@ class macro_plastic:
         self.fig = None
         self.dt = dt
         self.max_number_of_pollution_spots = max_number_of_pollution_spots
-        self.max_number_of_trash_elements_per_spot = max_number_of_trash_elements_per_spot
+        self.total_trash_elements = total_trash_elements
         
         distances, self.closest_indices = distance_transform_edt(grid == 0, return_indices=True)
         
@@ -48,11 +48,18 @@ class macro_plastic:
         #                   for _ in range(self.pollution_spots_number)]
         
         starting_points = self.rng_pollution_spots_locations_indexes.choice(np.arange(0, len(self.visitable_positions)), self.pollution_spots_number, replace=False)
+        # number_of_trash_elements_in_each_spot = self.rng_number_of_trash_elements.normal(loc=0, 
+        #                                                                               scale=self.max_number_of_trash_elements_per_spot, 
+        #                                                                               size=self.pollution_spots_number).round().astype(int)
+        # self.number_of_trash_elements_in_each_spot = np.clip(np.abs(number_of_trash_elements_in_each_spot),int(100/number_of_trash_elements_in_each_spot.shape[0]), self.max_number_of_trash_elements_per_spot)
+        #total_trash_elements = 100
         number_of_trash_elements_in_each_spot = self.rng_number_of_trash_elements.normal(loc=0, 
-                                                                                      scale=self.max_number_of_trash_elements_per_spot, 
-                                                                                      size=self.pollution_spots_number).round().astype(int)
-        self.number_of_trash_elements_in_each_spot = np.clip(np.abs(number_of_trash_elements_in_each_spot),int(100/number_of_trash_elements_in_each_spot.shape[0]), self.max_number_of_trash_elements_per_spot)
-        #number_of_trash_elements_in_each_spot[number_of_trash_elements_in_each_spot <= 0] = 10 # minimum number of trash elements in a spot
+                                                  scale=self.total_trash_elements, 
+                                                  size=self.pollution_spots_number).round().astype(int)
+        number_of_trash_elements_in_each_spot = np.clip(np.abs(number_of_trash_elements_in_each_spot), 1, self.total_trash_elements)
+        number_of_trash_elements_in_each_spot = (number_of_trash_elements_in_each_spot / number_of_trash_elements_in_each_spot.sum()) * self.total_trash_elements
+        self.number_of_trash_elements_in_each_spot = number_of_trash_elements_in_each_spot.round().astype(int)
+        self.number_of_trash_elements_in_each_spot[0] += self.total_trash_elements - self.number_of_trash_elements_in_each_spot.sum() # take the first element and add the difference if there is any
         cov = 7.0
         self.particles = self.rng_trash_positions_MVN.multivariate_normal(self.visitable_positions[starting_points[0]], np.array([[cov, 0.0],[0.0, cov]]),size=(self.number_of_trash_elements_in_each_spot[0],)) 
         for i in range(1, self.pollution_spots_number):
@@ -72,7 +79,7 @@ class macro_plastic:
         
     def apply_current_field(self, particle):
 
-        current_movement = self.wind_direction + self.rng_steps.random()
+        current_movement = self.wind_direction + 0.1*self.rng_steps.uniform(low=-1.0, high=1.0, size=2)
         new_particle = np.clip(particle + self.dt*current_movement, 0, np.array(self.map.shape)-1)
         
         return new_particle if self.is_inside_map(new_particle) else None

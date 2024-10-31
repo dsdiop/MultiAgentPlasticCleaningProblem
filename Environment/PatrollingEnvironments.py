@@ -453,6 +453,12 @@ class MultiAgentPatrolling(gym.Env):
 				agent_observation_of_position[pos.astype(bool)] = np.flip(trail_values)[j]	
 	
 			agent_observation_of_fleet = self.fleet.redundancy_mask.copy() - self.fleet.vehicles[i].detection_mask.copy()
+			
+			# Set cells that are 0 in self.scenario_map to -1 in the observations
+			# self.normalized_known_information[self.scenario_map == 0] = -1
+			# agent_observation_of_position[self.scenario_map == 0] = -1
+			# agent_observation_of_fleet[self.scenario_map == 0] = -1
+   
 			state[i] = np.concatenate((
 				self.normalized_known_information[np.newaxis],
 				agent_observation_of_position[np.newaxis],
@@ -475,6 +481,7 @@ class MultiAgentPatrolling(gym.Env):
 			if self.active_agents[agent_id]:
 				#if action[agent_id] == 8:
 				n_trash_to_clean = 100
+				#n_trash_to_clean = 26 -  self.total_n_trash_cleaned[agent_id]
 				if self.gt.map[self.fleet.vehicles[agent_id].position[0],self.fleet.vehicles[agent_id].position[1]] > 0:
 					self.n_trash_cleaned[agent_id] = self.gt.clean_particles(self.fleet.vehicles[agent_id].position, n_trash_to_clean)
        # Update model #
@@ -495,7 +502,11 @@ class MultiAgentPatrolling(gym.Env):
 		self.update_metrics()
   
 		# Final condition #
-		done = {agent_id: self.fleet.get_distances()[agent_id] > self.distance_budget or self.fleet.fleet_collisions > self.max_collisions for agent_id in range(self.number_of_agents)}
+		done = {agent_id: self.fleet.get_distances()[agent_id] > self.distance_budget 
+          		or self.fleet.fleet_collisions > self.max_collisions 
+            	or self.percentage_of_trash_cleaned == 1
+				#or self.total_n_trash_cleaned[agent_id] > 25
+                for agent_id in range(self.number_of_agents)}
 		self.active_agents = [not d for d in done.values()]
 		
 		# Update ground truth if dynamic #
@@ -656,22 +667,30 @@ class MultiAgentPatrolling(gym.Env):
 				if self.active_agents[idx]:
 					if np.sum(self.fleet.new_visited_mask[agent.detection_mask.astype(bool)]) == 0:
 						self.no_discovery_steps[idx] += 1
+						# Penalize based on the number of last positions in the detection mask
+						penalty = 0	
+						for i in range(len(self.last_positions)):
+							penalty += sum([np.sum(pos.astype(bool) & agent.detection_mask.astype(bool)) 
+                     					for pos in self.last_positions[i]])
+						rewards_exploration[idx] -= penalty/(np.sum(agent.detection_mask)*10)
 					else:
 						self.no_discovery_steps[idx] = 0
 					rewards_exploration[idx] -= (1/self.min_movements_if_nocollisions) * self.no_discovery_steps[idx]
-			
-			filtered_map = self.calculate_field_map(self.normalized_known_information, self.scenario_map, alpha=1.0)
-			filtered_map = (filtered_map - np.min(filtered_map)) / (np.max(filtered_map) - np.min(filtered_map) + 1e-8)	
+					#rewards_exploration[idx] -= 1
+			filtered_map = self.calculate_field_map(self.normalized_known_information, self.fleet.collective_mask, alpha=1.0)
+			#filtered_map = (filtered_map - np.min(filtered_map)) / (np.max(filtered_map) - np.min(filtered_map) + 1e-8)	
 			if self.percentage_of_trash_cleaned == 1 and np.sum(filtered_map)==0:
 				rewards_cleaning = np.ones_like(rewards_exploration)
 			else:
 			#model_change = np.array([np.sum(self.gt.map[veh.detection_mask.astype(bool)] - 
 				rewards_cleaning = self.n_trash_cleaned - (1 - np.array([
-							(self.total_n_trash_cleaned[i]+1)*np.sum(filtered_map[veh.detection_mask.astype(bool)]
+							np.sum(filtered_map[veh.detection_mask.astype(bool)]
 									/ (np.sum(veh.detection_mask) * self.fleet.redundancy_mask[veh.detection_mask.astype(bool)]))
 								for i,veh in enumerate(self.fleet.vehicles)]))
 			
-      
+			if self.model_ant is not None:
+				model_change = np.array([np.sum(np.abs(self.model[veh.detection_mask.astype(bool)] - self.model_ant[veh.detection_mask.astype(bool)])) for veh in self.fleet.vehicles])
+				rewards_cleaning += model_change
 		rewards = np.vstack((rewards_exploration, rewards_cleaning)).T
 		#print(rewards)
 		self.info = {}
