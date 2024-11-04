@@ -457,6 +457,7 @@ class MultiAgentDuelingDQNAgent:
 			trial = optuna_hyperparameter_optimization['trial']
 			self.writer.add_text('Optuna', json.dumps(trial.params), 0)
 			train_step = -1
+			self.write_experiment_config()
   
 		self.is_eval = False
 		# Reset episode count #
@@ -608,28 +609,28 @@ class MultiAgentDuelingDQNAgent:
 						# Handle pruning based on the intermediate value.
 						if trial.should_prune():
 							raise optuna.TrialPruned()
-					else:
-						if mean_reward_exploration > record[0]:
-							print(f"New best policy with mean exploration reward of {mean_reward_exploration}")
-							print("Saving model in " + self.writer.log_dir)
-							record[0] = mean_reward_exploration
-							self.save_model(name=f'BestPolicy_reward_exploration.pth')
-						if percentage_of_map_visited > percentage_of_map_visited_record:
-							print(f"New best policy with percentage of map visited of {mean_reward_exploration}")
-							print("Saving model in " + self.writer.log_dir)
-							percentage_of_map_visited_record = percentage_of_map_visited
-							self.save_model(name=f'BestPolicy_perc_map_visited.pth')
+					
+					if mean_reward_exploration > record[0]:
+						print(f"New best policy with mean exploration reward of {mean_reward_exploration}")
+						print("Saving model in " + self.writer.log_dir)
+						record[0] = mean_reward_exploration
+						self.save_model(name=f'BestPolicy_reward_exploration.pth')
+					if percentage_of_map_visited > percentage_of_map_visited_record:
+						print(f"New best policy with percentage of map visited of {mean_reward_exploration}")
+						print("Saving model in " + self.writer.log_dir)
+						percentage_of_map_visited_record = percentage_of_map_visited
+						self.save_model(name=f'BestPolicy_perc_map_visited.pth')
 
-						if mean_reward_cleaning > record[1]:
-							print(f"New best policy with mean cleaning reward of {mean_reward_cleaning}")
-							print("Saving model in " + self.writer.log_dir)
-							record[1] = mean_reward_cleaning
-							self.save_model(name=f'BestPolicy_reward_cleaning.pth')
-						if percentage_of_trash_cleaned > mean_clean_record:
-							print(f"New best policy with mean trash cleaned of {percentage_of_trash_cleaned} \%")
-							print("Saving model in " + self.writer.log_dir)
-							mean_clean_record = percentage_of_trash_cleaned
-							self.save_model(name=f'BestCleaningPolicy.pth')
+					if mean_reward_cleaning > record[1]:
+						print(f"New best policy with mean cleaning reward of {mean_reward_cleaning}")
+						print("Saving model in " + self.writer.log_dir)
+						record[1] = mean_reward_cleaning
+						self.save_model(name=f'BestPolicy_reward_cleaning.pth')
+					if percentage_of_trash_cleaned > mean_clean_record:
+						print(f"New best policy with mean trash cleaned of {percentage_of_trash_cleaned} \%")
+						print("Saving model in " + self.writer.log_dir)
+						mean_clean_record = percentage_of_trash_cleaned
+						self.save_model(name=f'BestCleaningPolicy.pth')
 
      
 			

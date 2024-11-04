@@ -50,7 +50,7 @@ nettype = '0'
 
 arch = 'v1'
 policy_name = 'Experimento_clean21_Distance_Field_model_filtered_map_alamillo_nsteps5'
-logdir=f'./Learning/runs/Vehicles_{N}/SecondPaper/Optuna'
+logdir=f'./Learning/runs/Vehicles_{N}/SecondPaper/Optuna_{args.map}_{args.benchmark}'
 
 def objective(trial: optuna.Trial):
     """ Optuna objective. """
@@ -161,12 +161,12 @@ def objective(trial: optuna.Trial):
 if __name__ == "__main__":
 
 	# Create a directory for the study
-	if not os.path.exists(f'./Learning/runs/Vehicles_{N}/SecondPaper/Optuna'):
-		os.mkdir(f'./Learning/runs/Vehicles_{N}/SecondPaper/Optuna')
+	if not os.path.exists(logdir):
+		os.makedirs(logdir)
 
-	study = optuna.create_study(direction="maximize", pruner=optuna.pruners.MedianPruner(), study_name="DQN_hyperparametrization")
+	study = optuna.create_study(direction="maximize", pruner=optuna.pruners.SuccessiveHalvingPruner() , study_name="DQN_hyperparametrization") # SuccessiveHalvingPruner() 
 
-	study.optimize(objective, n_trials=4, show_progress_bar=True)
+	study.optimize(objective, n_trials=50, show_progress_bar=True)
 
 	pruned_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED])
 	complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
@@ -185,88 +185,5 @@ if __name__ == "__main__":
 	for key, value in trial.params.items():
 		print("	{}: {}".format(key, value))
 
-	joblib.dump(study, f"./Learning/runs/Vehicles_{N}/SecondPaper/Optuna/DRL_hyperparam_study.pkl")
+	joblib.dump(study, f"{logdir}/DRL_hyperparam_study.pkl")
 
-
-
-# #frame_stack
-# nettype = '0'
-
-# N=4
-# ww = None
-# wm = dict()
-# archs = ['v1']
-# i=0
-# rew = 'v5'
-# num_of_eval_episodes = 200
-# seed_eval = 30
-# eps = 25000
-# target_update = 2000
-# nu_steps = [1.0,0.9,0.8,0.7,0.6,0.5,0.4,0.3,0.2,0.1,0.0]
-# initial_network =  f'Experimento_clean13_Negative_reward_model_filtered_map_1.0'
-# #windows_datapath = os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..','Downloads') #"C:\\Users\\dames\\Downloads\\"
-# prewarm_buffer = data_path+'/prewarm_buffer/buffer.pkl'
-# for _ in range(1):
-#     prewarm_buffer = data_path+'/prewarm_buffer/buffer_cleaning_random_wandering.pkl'
-#     prewarm_buffer = None
-#     for arch in archs:
-#         eval_dir = f'{data_path}/Evaluation/Results/'
-#         if not os.path.exists(eval_dir):
-#             os.makedirs(eval_dir)
-#         policy_name = 'Experimento_clean21_Distance_Field_model_filtered_map_alamillo_nsteps5'
-#         logdir=f'./Learning/runs/Vehicles_{N}/SecondPaper/'+policy_name
-#         env = MultiAgentPatrolling(scenario_map=sc_map,
-#                                 fleet_initial_positions=initial_positions,
-#                                 distance_budget=200,
-#                                 number_of_vehicles=N,
-#                                 seed=0,
-#                                 miopic=True,
-#                                 detection_length=2,
-#                                 movement_length=1,
-#                                 max_collisions=15,
-#                                 reward_type='Distance Field',
-#                                 convert_to_uint8=False,
-#                                 ground_truth_type='macro_plastic',
-#                                 obstacles=False,
-#                                 frame_stacking=1,
-#                                 state_index_stacking=(1, 2, 3)
-#                                 )
-#         multiagent = MultiAgentDuelingDQNAgent(env=env,
-#                                             memory_size=int(1E6),
-#                                             batch_size=128,#64
-#                                             target_update=target_update,
-#                                             soft_update=True,
-#                                             tau=0.001,
-#                                             epsilon_values=[1.0, 0.05],
-#                                             epsilon_interval=[0.0, 0.5],
-#                                             learning_starts=100, # 100
-#                                             gamma=0.99,
-#                                             alpha= 0.2,
-#                                             beta = 0.4,
-#                                             n_steps=5,
-#                                             lr=1e-4,
-#                                             number_of_features=1024,
-#                                             noisy=False,
-#                                             nettype=nettype,
-#                                             archtype=arch,
-#                                             device='cuda:1',
-#                                             weighted=False,
-#                                             train_every=7,
-#                                             save_every=1000,
-#                                             distributional=False,
-#                                             logdir=logdir,
-#                                             prewarmed_memory=prewarm_buffer,
-#                                             use_nu=True,
-#                                             nu_intervals=[[0., 1], [0.3, 1], [.6, 0.], [1., 0.]],
-#                                             concatenatedDQN = False,
-#                                             eval_episodes=100,
-#                                             masked_actions= True,
-#                                             consensus = True,
-#                                             eval_every=200,
-#                                             weighting_method=ww,
-#                                             weight_methods_parameters=wm
-#                                             )
-#         # multiagent.load_model(initial_network + '/Final_Policy.pth')
-#         multiagent.train(episodes=25000)
-#         initial_network = logdir
-#         torch.cuda.empty_cache()

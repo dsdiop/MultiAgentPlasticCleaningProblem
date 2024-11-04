@@ -1,8 +1,6 @@
 /runs
-*.pyc
 *.pth
 *.DS_Store
-__pycache__/
 *.py[cod]
 *.idea
 *.vscode
