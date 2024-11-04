@@ -436,8 +436,7 @@ class MultiAgentDuelingDQNAgent:
 		else:
 			return (b_end - b_init) / (p_fin - p_init) * (p - p_init) + b_init
 
-	def train(self, episodes):
-		# TODO: Change for multiagent
+	def train(self, episodes, optuna_hyperparameter_optimization = None):
 
 		""" Train the agent. """
 
@@ -449,8 +448,16 @@ class MultiAgentDuelingDQNAgent:
 			self.writer = SummaryWriter(log_dir=self.logdir, filename_suffix=self.experiment_name)
 			self.write_experiment_config()
 			self.env.save_environment_configuration(self.logdir if self.logdir is not None else './')
-		
-		# Agent in training mode #
+   
+		if optuna_hyperparameter_optimization is not None:
+			import optuna
+			episodes = optuna_hyperparameter_optimization['train_step']*optuna_hyperparameter_optimization['episode_per_train_step']
+			self.eval_every = optuna_hyperparameter_optimization['episode_per_train_step']
+			self.eval_episodes = optuna_hyperparameter_optimization['eval_episodes']
+			trial = optuna_hyperparameter_optimization['trial']
+			self.writer.add_text('Optuna', json.dumps(trial.params), 0)
+			train_step = -1
+  
 		self.is_eval = False
 		# Reset episode count #
 		self.episode = 1
@@ -579,45 +586,59 @@ class MultiAgentDuelingDQNAgent:
 					self.save_model(name=f'Episode_{episode}_Policy.pth')
 
 			if self.eval_every is not None:
+				if optuna_hyperparameter_optimization is not None:
+					train_step += 1
 				if episode % self.eval_every == 0:
-					mean_reward_exploration, mean_reward_cleaning, mean_reward, mean_length, total_n_trash_cleaned, percentage_of_map_visited = self.evaluate_agents(self.eval_episodes)
+					mean_reward_exploration, mean_reward_cleaning, mean_reward, mean_length, percentage_of_trash_cleaned, percentage_of_map_visited = self.evaluate_agents(self.eval_episodes)
 					self.writer.add_scalar('test/accumulated_reward_exploration', mean_reward_exploration, self.episode)
 					self.writer.add_scalar('test/accumulated_reward_cleaning', mean_reward_cleaning, self.episode)
 					self.writer.add_scalar('test/accumulated_reward', mean_reward, self.episode)
 					self.writer.add_scalar('test/accumulated_length', mean_length, self.episode)
-					self.writer.add_scalar('test/trash_cleaned', total_n_trash_cleaned, self.episode)
+					self.writer.add_scalar('test/trash_cleaned', percentage_of_trash_cleaned, self.episode)
 					self.writer.add_scalar('test/percentage_of_map_visited', percentage_of_map_visited, self.episode)
 					# Save policy if is better on average
 					mean_episodic_reward = np.mean(episodic_reward_vector[-50:], axis=0)
 					mean_reward = np.mean(mean_episodic_reward)
      
-					if mean_reward_exploration > record[0]:
-						print(f"New best policy with mean exploration reward of {mean_reward_exploration}")
-						print("Saving model in " + self.writer.log_dir)
-						record[0] = mean_reward_exploration
-						self.save_model(name=f'BestPolicy_reward_exploration_episode_{episode}.pth')
-					if percentage_of_map_visited > percentage_of_map_visited_record:
-						print(f"New best policy with percentage of map visited of {mean_reward_exploration}")
-						print("Saving model in " + self.writer.log_dir)
-						percentage_of_map_visited_record = percentage_of_map_visited
-						self.save_model(name=f'BestPolicy_perc_map_visited_episode_{episode}.pth')
+					if optuna_hyperparameter_optimization is not None:
+						# Report the trial
+						mean_metrics = percentage_of_trash_cleaned + percentage_of_map_visited
+						trial.report(mean_metrics,train_step)
 
-					if mean_reward_cleaning > record[1]:
-						print(f"New best policy with mean cleaning reward of {mean_reward_cleaning}")
-						print("Saving model in " + self.writer.log_dir)
-						record[1] = mean_reward_cleaning
-						self.save_model(name=f'BestPolicy_reward_cleaning_episode_{episode}.pth')
-					if total_n_trash_cleaned > mean_clean_record:
-						print(f"New best policy with mean trash cleaned of {total_n_trash_cleaned} \%")
-						print("Saving model in " + self.writer.log_dir)
-						mean_clean_record = total_n_trash_cleaned
-						self.save_model(name=f'BestCleaningPolicy_episode_{episode}.pth')
+						# Handle pruning based on the intermediate value.
+						if trial.should_prune():
+							raise optuna.TrialPruned()
+					else:
+						if mean_reward_exploration > record[0]:
+							print(f"New best policy with mean exploration reward of {mean_reward_exploration}")
+							print("Saving model in " + self.writer.log_dir)
+							record[0] = mean_reward_exploration
+							self.save_model(name=f'BestPolicy_reward_exploration.pth')
+						if percentage_of_map_visited > percentage_of_map_visited_record:
+							print(f"New best policy with percentage of map visited of {mean_reward_exploration}")
+							print("Saving model in " + self.writer.log_dir)
+							percentage_of_map_visited_record = percentage_of_map_visited
+							self.save_model(name=f'BestPolicy_perc_map_visited.pth')
+
+						if mean_reward_cleaning > record[1]:
+							print(f"New best policy with mean cleaning reward of {mean_reward_cleaning}")
+							print("Saving model in " + self.writer.log_dir)
+							record[1] = mean_reward_cleaning
+							self.save_model(name=f'BestPolicy_reward_cleaning.pth')
+						if percentage_of_trash_cleaned > mean_clean_record:
+							print(f"New best policy with mean trash cleaned of {percentage_of_trash_cleaned} \%")
+							print("Saving model in " + self.writer.log_dir)
+							mean_clean_record = percentage_of_trash_cleaned
+							self.save_model(name=f'BestCleaningPolicy.pth')
+
      
 			
 
 		# Save the final policy #
 		self.save_model(name='Final_Policy.pth')
-
+		if optuna_hyperparameter_optimization is not None:
+			return mean_metrics
+	
 	def _compute_ddqn_multihead_loss(self, samples: Dict[str, np.ndarray]) -> torch.Tensor:
 
 		"""Return dqn loss."""
@@ -647,7 +668,7 @@ class MultiAgentDuelingDQNAgent:
 			next_maxq_values_2 = next_maxq_values[:, self.action_dim[0]:]
 			next_max_action_values_1 = next_maxq_values_1.max(dim=1, keepdim=True)[1]
 			next_max_action_values_2 = next_maxq_values_2.max(dim=1, keepdim=True)[1]
-			next_max_action_values = torch.cat([next_max_action_values_1, next_max_action_values_2], dim=1).view(128,2,-1)
+			next_max_action_values = torch.cat([next_max_action_values_1, next_max_action_values_2], dim=1).view(self.batch_size,2,-1)
 		elementwise_loss = [0, 0]
 		self.action_mask = [None, None]
 		samples_aux = copy(samples)
